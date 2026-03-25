@@ -1,0 +1,34 @@
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+
+export default function SettingsPage() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+        <p className="text-muted-foreground">
+          Configure your MerchPortal settings
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Coming Soon</CardTitle>
+          <CardDescription>
+            Settings and configuration options will be available here.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-muted-foreground">
+          <p>
+            Future settings may include:
+          </p>
+          <ul className="list-disc list-inside mt-2 space-y-1">
+            <li>User management and role assignments</li>
+            <li>Email notification preferences</li>
+            <li>Default address and company info</li>
+            <li>Integration settings</li>
+          </ul>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

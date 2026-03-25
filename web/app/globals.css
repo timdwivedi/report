@@ -1,0 +1,571 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 217.2 91.2% 59.8%; /* Blue-500: #3B82F6 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 20.2% 65.1%; /* Slate-400: #94A3B8 */
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 38 92% 50%; /* Amber-500: #F59E0B */
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 217.2 91.2% 59.8%;
+    --radius: 0.625rem; /* 10px for enterprise feel */
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 217.2 32.6% 12%;
+    --card-foreground: 210 40% 98%;
+    --popover: 217.2 32.6% 12%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 65%;
+    --primary-foreground: 222.2 84% 4.9%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 20%;
+    --input: 217.2 32.6% 20%;
+    --ring: 217.2 91.2% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* =============================================
+   PREMIUM DEPTH UTILITIES
+   4 layers: dot grid → glow blobs → noise texture → content depth
+   Use these on landing pages and marketing sections for premium feel.
+   ============================================= */
+
+/* Layer 3: Noise/grain texture overlay — breaks up flat color banding.
+   Add class to a wrapper element. Content inside should have relative z-10. */
+.noise-overlay {
+  position: relative;
+}
+.noise-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 182px;
+  opacity: 0.035;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Layer 1: Dot grid pattern with radial mask fade.
+   Add as a child div inside a section with position: relative. */
+.dot-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 1px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 40%, #000 30%, transparent 100%);
+  mask-image: radial-gradient(ellipse 60% 50% at 50% 40%, #000 30%, transparent 100%);
+  pointer-events: none;
+}
+
+/* Dot grid for light backgrounds — uses primary-tinted dots instead of white */
+.dot-grid-light {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(59, 130, 246, 0.3) 1px, transparent 1px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 40%, #000 30%, transparent 100%);
+  mask-image: radial-gradient(ellipse 60% 50% at 50% 40%, #000 30%, transparent 100%);
+  pointer-events: none;
+}
+
+/* Layer 4: Premium card with inner top highlight + depth shadow.
+   Add to any card element for glass-like depth. */
+.card-depth {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    0 0 0 1px rgba(0, 0, 0, 0.3),
+    0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Headline gradient: white → muted for premium feel.
+   Padding-bottom prevents descender clipping (g, y, p, q). */
+.text-gradient-headline {
+  background: linear-gradient(to bottom, #ffffff 0%, #a1a1aa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  padding-bottom: 0.1em;
+}
+
+/* Headline glow — subtle text-shadow behind key headlines.
+   Pair with text-gradient-headline or gradient spans for emphasis. */
+.text-glow-primary {
+  text-shadow: 0 0 40px hsl(var(--primary) / 0.25);
+}
+
+.text-glow-accent {
+  text-shadow: 0 0 40px hsl(var(--accent) / 0.2);
+}
+
+/* Color-specific headline glows — use with brand colors */
+.text-glow-gold {
+  text-shadow: 0 0 40px rgba(212, 175, 55, 0.25);
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 40px rgba(0, 212, 255, 0.2);
+}
+
+/* =============================================
+   ANIMATIONS — float, breathe, shimmer, pulse
+   ============================================= */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px var(--gold-glow, rgba(212,175,55,0.15)); }
+  50% { box-shadow: 0 0 40px var(--gold-glow, rgba(212,175,55,0.25)); }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-breathe {
+  animation: breathe 4s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  animation: shimmer 3s infinite;
+}
+
+.animate-pulse-gold {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+/* =============================================
+   MANIFESTO / LORE PAGE — Premium Card Glow System
+   3-layer box-shadow: edge highlight + spread glow + atmosphere
+   ============================================= */
+
+/* Page-level noise texture (fixed, single instance for perf) */
+.page-noise {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 182px;
+  will-change: transform;
+}
+
+/* Page-level dot grid (fixed, single instance for perf) */
+.page-dots {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.3;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 1px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 40%, #000 30%, transparent 100%);
+  mask-image: radial-gradient(ellipse 60% 50% at 50% 40%, #000 30%, transparent 100%);
+  will-change: transform;
+}
+
+/* Section GPU isolation for off-screen sections */
+.manifesto-section {
+  position: relative;
+  isolation: isolate;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+/* Base manifesto card — shared across gold/cyan/purple variants */
+.manifesto-card,
+.manifesto-card-cyan,
+.manifesto-card-purple {
+  background: rgba(26, 26, 35, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    0 0 0 1px rgba(0, 0, 0, 0.2),
+    0 4px 24px rgba(0, 0, 0, 0.4);
+  will-change: transform, opacity;
+}
+
+/* Gold card hover — laws, mission, benefits */
+.manifesto-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(212, 175, 55, 0.4);
+  box-shadow:
+    0 10px 40px rgba(212, 175, 55, 0.15),
+    0 0 60px rgba(212, 175, 55, 0.1),
+    inset 0 1px 0 rgba(212, 175, 55, 0.2);
+}
+
+/* Cyan card hover */
+.manifesto-card-cyan:hover {
+  transform: translateY(-4px);
+  border-color: rgba(0, 212, 255, 0.4);
+  box-shadow:
+    0 10px 40px rgba(0, 212, 255, 0.15),
+    0 0 60px rgba(0, 212, 255, 0.1),
+    inset 0 1px 0 rgba(0, 212, 255, 0.2);
+}
+
+/* Purple card hover */
+.manifesto-card-purple:hover {
+  transform: translateY(-4px);
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow:
+    0 10px 40px rgba(139, 92, 246, 0.15),
+    0 0 60px rgba(139, 92, 246, 0.1),
+    inset 0 1px 0 rgba(139, 92, 246, 0.2);
+}
+
+/* Featured quote card — permanent subtle gold glow */
+.manifesto-quote {
+  background: rgba(26, 26, 35, 0.6);
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 0 rgba(212, 175, 55, 0.1),
+    0 0 40px rgba(212, 175, 55, 0.08),
+    0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* Purple quote card */
+.manifesto-quote-purple {
+  background: rgba(26, 26, 35, 0.5);
+  border-left: 2px solid rgba(139, 92, 246, 0.4);
+  border-radius: 0 16px 16px 0;
+  box-shadow:
+    0 0 30px rgba(139, 92, 246, 0.06),
+    0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* Responsive glow scaling — mobile drops to 2-layer, halved spread */
+@media (max-width: 768px) {
+  .manifesto-card:hover,
+  .manifesto-card-cyan:hover,
+  .manifesto-card-purple:hover {
+    transform: translateY(-2px);
+  }
+
+  .manifesto-card:hover {
+    box-shadow:
+      0 5px 20px rgba(212, 175, 55, 0.12),
+      inset 0 1px 0 rgba(212, 175, 55, 0.15);
+  }
+
+  .manifesto-card-cyan:hover {
+    box-shadow:
+      0 5px 20px rgba(0, 212, 255, 0.12),
+      inset 0 1px 0 rgba(0, 212, 255, 0.15);
+  }
+
+  .manifesto-card-purple:hover {
+    box-shadow:
+      0 5px 20px rgba(139, 92, 246, 0.12),
+      inset 0 1px 0 rgba(139, 92, 246, 0.15);
+  }
+}
+
+/* =============================================
+   DARK MODE — Global Overrides
+   Remaps common hardcoded Tailwind utilities so we don't
+   need to add dark: prefix to every component file.
+   ============================================= */
+
+/* Color scheme for native elements */
+html.dark { color-scheme: dark; }
+
+/* --- Structural Backgrounds --- */
+.dark .bg-white { background-color: hsl(217.2 32.6% 12%) !important; }
+.dark .bg-slate-50 { background-color: hsl(222.2 84% 4.9%) !important; }
+.dark .bg-slate-100 { background-color: hsl(217.2 32.6% 15%) !important; }
+.dark .bg-slate-200 { background-color: hsl(217.2 32.6% 20%) !important; }
+
+/* --- Text Colors --- */
+.dark .text-slate-900 { color: hsl(210 40% 98%) !important; }
+.dark .text-slate-800 { color: hsl(210 40% 93%) !important; }
+.dark .text-slate-700 { color: hsl(215 20.2% 75%) !important; }
+.dark .text-slate-600 { color: hsl(215 20.2% 65%) !important; }
+.dark .text-slate-500 { color: hsl(215 20.2% 55%) !important; }
+.dark .text-slate-400 { color: hsl(215 20.2% 50%) !important; }
+
+/* --- Borders --- */
+.dark .border-slate-100 { border-color: hsl(217.2 32.6% 17%) !important; }
+.dark .border-slate-200 { border-color: hsl(217.2 32.6% 20%) !important; }
+.dark .border-slate-300 { border-color: hsl(217.2 32.6% 25%) !important; }
+
+/* --- Hover States --- */
+.dark .hover\:bg-slate-50:hover { background-color: hsl(217.2 32.6% 17%) !important; }
+.dark .hover\:bg-slate-100:hover { background-color: hsl(217.2 32.6% 20%) !important; }
+.dark .hover\:bg-slate-200:hover { background-color: hsl(217.2 32.6% 23%) !important; }
+.dark .hover\:text-slate-900:hover { color: hsl(210 40% 98%) !important; }
+.dark .hover\:text-slate-700:hover { color: hsl(215 20.2% 75%) !important; }
+
+/* --- Dividers --- */
+.dark .divide-slate-50 > :not([hidden]) ~ :not([hidden]) { border-color: hsl(217.2 32.6% 15%) !important; }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: hsl(217.2 32.6% 17%) !important; }
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: hsl(217.2 32.6% 20%) !important; }
+
+/* --- Placeholder text --- */
+.dark .placeholder\:text-slate-400::placeholder { color: hsl(215 20.2% 40%) !important; }
+
+/* --- Shadows (reduced intensity) --- */
+.dark .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.4) !important; }
+.dark .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -4px rgba(0,0,0,0.4) !important; }
+
+/* --- Form Inputs --- */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.dark select,
+.dark textarea {
+  background-color: hsl(217.2 32.6% 15%);
+  color: hsl(210 40% 98%);
+  border-color: hsl(217.2 32.6% 22%);
+}
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: hsl(217.2 91.2% 55%);
+}
+
+/* --- Status/Badge Tinted Backgrounds --- */
+.dark .bg-emerald-50 { background-color: hsl(152 50% 12%) !important; }
+.dark .bg-emerald-100 { background-color: hsl(152 50% 15%) !important; }
+.dark .bg-amber-50 { background-color: hsl(38 50% 12%) !important; }
+.dark .bg-amber-100 { background-color: hsl(38 50% 15%) !important; }
+.dark .bg-red-50 { background-color: hsl(0 50% 12%) !important; }
+.dark .bg-red-100 { background-color: hsl(0 50% 15%) !important; }
+.dark .bg-purple-100 { background-color: hsl(270 50% 15%) !important; }
+.dark .bg-violet-100 { background-color: hsl(263 50% 15%) !important; }
+.dark .bg-yellow-100 { background-color: hsl(45 50% 15%) !important; }
+.dark .bg-orange-100 { background-color: hsl(25 50% 15%) !important; }
+.dark .bg-sky-100 { background-color: hsl(198 50% 15%) !important; }
+.dark .bg-cyan-100 { background-color: hsl(185 50% 15%) !important; }
+.dark .bg-gray-100 { background-color: hsl(220 20% 18%) !important; }
+
+/* --- Blue/Indigo accent backgrounds --- */
+.dark .bg-blue-50,
+.dark .bg-blue-50\/70 { background-color: hsl(217 80% 12%) !important; }
+.dark .hover\:bg-blue-50\/70:hover { background-color: hsl(217 80% 15%) !important; }
+.dark .bg-blue-100 { background-color: hsl(217 70% 18%) !important; }
+.dark .bg-blue-200 { background-color: hsl(217 60% 25%) !important; }
+.dark .bg-blue-500 { background-color: hsl(217.2 91.2% 55%) !important; }
+.dark .bg-indigo-50 { background-color: hsl(234 60% 12%) !important; }
+.dark .bg-indigo-100 { background-color: hsl(234 50% 18%) !important; }
+.dark .hover\:bg-indigo-100:hover { background-color: hsl(234 50% 22%) !important; }
+
+/* --- Primary tinted backgrounds --- */
+.dark .bg-primary-50 { background-color: hsl(217 80% 12%) !important; }
+.dark .bg-primary-100 { background-color: hsl(217 70% 18%) !important; }
+.dark .hover\:bg-primary-50:hover { background-color: hsl(217 70% 15%) !important; }
+
+/* --- Gradient overrides --- */
+.dark .from-primary-50 { --tw-gradient-from: hsl(217 80% 12%) !important; }
+.dark .to-primary-100 { --tw-gradient-to: hsl(217 70% 18%) !important; }
+.dark .from-primary-100 { --tw-gradient-from: hsl(217 70% 18%) !important; }
+.dark .to-primary-200 { --tw-gradient-to: hsl(217 60% 25%) !important; }
+.dark .hover\:from-primary-100:hover { --tw-gradient-from: hsl(217 70% 18%) !important; }
+.dark .hover\:to-primary-200:hover { --tw-gradient-to: hsl(217 60% 25%) !important; }
+
+/* --- Primary border overrides --- */
+.dark .border-primary-200 { border-color: hsl(217 60% 25%) !important; }
+.dark .border-primary-300 { border-color: hsl(217 60% 30%) !important; }
+.dark .hover\:border-primary-300:hover { border-color: hsl(217 60% 30%) !important; }
+.dark .border-indigo-200 { border-color: hsl(234 50% 25%) !important; }
+
+/* --- Ring/Focus colors --- */
+.dark .ring-slate-200 { --tw-ring-color: hsl(217.2 32.6% 25%) !important; }
+.dark .focus\:ring-primary-500:focus { --tw-ring-color: hsl(217.2 91.2% 55%) !important; }
+.dark .focus\:ring-indigo-500:focus { --tw-ring-color: hsl(234 89% 65%) !important; }
+
+/* --- Scrollbar for dark mode --- */
+.dark ::-webkit-scrollbar-track { background: hsl(222.2 84% 4.9%); }
+.dark ::-webkit-scrollbar-thumb { background: hsl(215 20.2% 25%); border-radius: 4px; }
+.dark ::-webkit-scrollbar-thumb:hover { background: hsl(215 20.2% 35%); }
+
+/* --- Opacity-variant backgrounds (tables, pricing grids) --- */
+.dark .bg-slate-50\/30 { background-color: hsl(217.2 32.6% 14%) !important; }
+.dark .bg-slate-50\/50 { background-color: hsl(217.2 32.6% 15%) !important; }
+.dark .bg-slate-100\/60 { background-color: hsl(217.2 32.6% 18%) !important; }
+.dark .bg-primary-50\/30 { background-color: hsl(217 50% 15%) !important; }
+.dark .bg-primary-50\/50 { background-color: hsl(217 50% 16%) !important; }
+.dark .bg-primary-100\/60 { background-color: hsl(217 50% 20%) !important; }
+.dark .bg-primary-100\/70 { background-color: hsl(217 50% 22%) !important; }
+.dark .bg-red-50\/50 { background-color: hsl(0 40% 14%) !important; }
+
+/* --- White opacity variants (slide-in panels, headers) --- */
+.dark .bg-white\/90 { background-color: hsla(217.2, 32.6%, 12%, 0.95) !important; }
+.dark .bg-white\/95 { background-color: hsla(217.2, 32.6%, 12%, 0.97) !important; }
+
+/* =============================================
+   LANDING PAGE — Force Light Theme
+   The marketing / landing page should always render in light
+   mode regardless of the user's dark theme preference.
+   Add class="force-light" to the landing page wrapper.
+   ============================================= */
+.dark .force-light,
+.dark .force-light .bg-white { background-color: #ffffff !important; color: #0f172a !important; }
+.dark .force-light .bg-slate-50 { background-color: #f8fafc !important; }
+.dark .force-light .bg-slate-100 { background-color: #f1f5f9 !important; }
+.dark .force-light .bg-slate-200 { background-color: #e2e8f0 !important; }
+.dark .force-light .bg-slate-900 { background-color: #0f172a !important; }
+.dark .force-light .bg-slate-950 { background-color: #020617 !important; }
+.dark .force-light .text-slate-900 { color: #0f172a !important; }
+.dark .force-light .text-slate-800 { color: #1e293b !important; }
+.dark .force-light .text-slate-700 { color: #334155 !important; }
+.dark .force-light .text-slate-600 { color: #475569 !important; }
+.dark .force-light .text-slate-500 { color: #64748b !important; }
+.dark .force-light .text-slate-400 { color: #94a3b8 !important; }
+.dark .force-light .text-slate-300 { color: #cbd5e1 !important; }
+.dark .force-light .text-white { color: #ffffff !important; }
+.dark .force-light .border-slate-100 { border-color: #f1f5f9 !important; }
+.dark .force-light .border-slate-200 { border-color: #e2e8f0 !important; }
+.dark .force-light .border-slate-300 { border-color: #cbd5e1 !important; }
+.dark .force-light .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05) !important; }
+.dark .force-light .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1) !important; }
+.dark .force-light .hover\:bg-slate-50:hover { background-color: #f8fafc !important; }
+.dark .force-light .hover\:bg-slate-100:hover { background-color: #f1f5f9 !important; }
+.dark .force-light .hover\:text-slate-900:hover { color: #0f172a !important; }
+.dark .force-light .hover\:text-slate-700:hover { color: #334155 !important; }
+.dark .force-light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.dark .force-light select,
+.dark .force-light textarea {
+  background-color: #ffffff;
+  color: #0f172a;
+  border-color: #e2e8f0;
+}
+
+/* --- Primary backgrounds --- */
+.dark .force-light .bg-primary-50 { background-color: #eff6ff !important; }
+.dark .force-light .bg-primary-100 { background-color: #dbeafe !important; }
+.dark .force-light .bg-primary-500 { background-color: #3b82f6 !important; }
+.dark .force-light .bg-primary-600 { background-color: #2563eb !important; }
+.dark .force-light .bg-primary-800 { background-color: #1e40af !important; }
+.dark .force-light .hover\:bg-primary-50:hover { background-color: #eff6ff !important; }
+
+/* --- Primary text --- */
+.dark .force-light .text-primary-100 { color: #dbeafe !important; }
+.dark .force-light .text-primary-600 { color: #2563eb !important; }
+.dark .force-light .text-primary-700 { color: #1d4ed8 !important; }
+
+/* --- Primary borders --- */
+.dark .force-light .border-primary-200 { border-color: #bfdbfe !important; }
+.dark .force-light .border-primary-500 { border-color: #3b82f6 !important; }
+
+/* --- Primary ring --- */
+.dark .force-light .ring-primary-500\/20 { --tw-ring-color: rgba(59, 130, 246, 0.2) !important; }
+
+/* --- Primary gradients --- */
+.dark .force-light .from-primary-50 { --tw-gradient-from: #eff6ff !important; }
+.dark .force-light .from-primary-600 { --tw-gradient-from: #2563eb !important; }
+.dark .force-light .to-primary-800 { --tw-gradient-to: #1e40af !important; }
+.dark .force-light .to-slate-50 { --tw-gradient-to: #f8fafc !important; }
+.dark .force-light .via-white { --tw-gradient-via: #ffffff !important; }
+
+/* --- Red/warning --- */
+.dark .force-light .bg-red-50 { background-color: #fef2f2 !important; }
+.dark .force-light .bg-red-600 { background-color: #dc2626 !important; }
+.dark .force-light .text-red-500 { color: #ef4444 !important; }
+.dark .force-light .text-red-800 { color: #991b1b !important; }
+.dark .force-light .text-red-900 { color: #7f1d1d !important; }
+.dark .force-light .border-red-100 { border-color: #fee2e2 !important; }
+.dark .force-light .border-red-300 { border-color: #fca5a5 !important; }
+
+/* --- Emerald/success --- */
+.dark .force-light .bg-emerald-50 { background-color: #ecfdf5 !important; }
+.dark .force-light .bg-emerald-100 { background-color: #d1fae5 !important; }
+.dark .force-light .text-emerald-600 { color: #059669 !important; }
+.dark .force-light .border-emerald-100 { border-color: #d1fae5 !important; }
+
+/* --- Amber --- */
+.dark .force-light .bg-amber-50 { background-color: #fffbeb !important; }
+.dark .force-light .bg-amber-100 { background-color: #fef3c7 !important; }
+
+/* --- Blue --- */
+.dark .force-light .bg-blue-50 { background-color: #eff6ff !important; }
+.dark .force-light .bg-blue-100 { background-color: #dbeafe !important; }
+.dark .force-light .bg-blue-500 { background-color: #3b82f6 !important; }
+
+/* --- White opacity variants --- */
+.dark .force-light .bg-white\/90 { background-color: rgba(255, 255, 255, 0.9) !important; }
+.dark .force-light .bg-white\/95 { background-color: rgba(255, 255, 255, 0.95) !important; }
+.dark .force-light .border-white\/60 { border-color: rgba(255, 255, 255, 0.6) !important; }
+
+/* --- Shadows --- */
+.dark .force-light .shadow-md { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1) !important; }
+.dark .force-light .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1) !important; }

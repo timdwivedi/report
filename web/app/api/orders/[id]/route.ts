@@ -1,0 +1,38 @@
+import { NextRequest } from 'next/server';
+import { authenticateRequest, jsonOk, jsonError, isSupabaseConfigured } from '@/lib/api-helpers';
+import { getDemoOrders } from '@/lib/demo/demo-data-provider';
+
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  if (!isSupabaseConfigured()) {
+    const order = getDemoOrders().find(o => o.id === params.id);
+    return order ? jsonOk(order) : jsonError('Not found', 404);
+  }
+
+  const { user, supabase, error } = await authenticateRequest(request);
+  if (!user) return jsonError('Unauthorized', 401);
+
+  const { data, error: dbError } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('id', params.id)
+    .single();
+
+  if (dbError) return jsonError(dbError.message, 500);
+  return jsonOk(data);
+}
+
+export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  const { user, supabase, error } = await authenticateRequest(request);
+  if (!user) return jsonError('Unauthorized', 401);
+
+  const body = await request.json();
+  const { data, error: dbError } = await supabase
+    .from('orders')
+    .update(body)
+    .eq('id', params.id)
+    .select()
+    .single();
+
+  if (dbError) return jsonError(dbError.message, 500);
+  return jsonOk(data);
+}

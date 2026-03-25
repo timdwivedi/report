@@ -1,0 +1,567 @@
+import { useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ArrowLeft, Loader2, Upload, Clock, FileText, Plus, Trash2, MessageSquare, Paperclip } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import type { CreativeRequest, CreativeRequestVersion, CreativeTimeEntry, CreativeRequestStatus, CreativeEditRequest, CreativeRequestAttachment } from '@/types/creative';
+import { creativeRequestTypeLabels, creativeRequestStatusLabels, creativeStatusColors } from '@/types/creative';
+import { EditRequestDialog } from '@/components/creative/EditRequestDialog';
+
+export default function CreativeDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const [versionNotes, setVersionNotes] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [timeMinutes, setTimeMinutes] = useState('');
+  const [timeNotes, setTimeNotes] = useState('');
+  const [timeDesigner, setTimeDesigner] = useState('');
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [attachNote, setAttachNote] = useState('');
+  const [attachUploading, setAttachUploading] = useState(false);
+
+  const { data: request, isLoading } = useQuery({
+    queryKey: ['creative-request', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('creative_requests')
+        .select('*, project:projects(id, name, client_id, client:clients(company_name))')
+        .eq('id', id)
+        .maybeSingle();
+      if (error) throw error;
+      return data as unknown as CreativeRequest;
+    },
+  });
+
+  const { data: versions } = useQuery({
+    queryKey: ['creative-versions', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('creative_request_versions')
+        .select('*')
+        .eq('creative_request_id', id)
+        .order('version_number', { ascending: false });
+      if (error) throw error;
+      return data as unknown as CreativeRequestVersion[];
+    },
+  });
+
+  const { data: timeEntries } = useQuery({
+    queryKey: ['creative-time-entries', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('creative_time_entries')
+        .select('*')
+        .eq('creative_request_id', id)
+        .order('date', { ascending: false });
+      if (error) throw error;
+      return data as unknown as CreativeTimeEntry[];
+    },
+  });
+
+  const { data: requestAttachments } = useQuery({
+    queryKey: ['creative-request-attachments', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('creative_request_attachments' as any)
+        .select('*')
+        .eq('creative_request_id', id)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return data as unknown as CreativeRequestAttachment[];
+    },
+  });
+
+  const { data: editRequests } = useQuery({
+    queryKey: ['creative-edit-requests', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('creative_edit_requests')
+        .select('*')
+        .eq('creative_request_id', id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      // Fetch attachments for each edit request
+      const editReqs = data as unknown as CreativeEditRequest[];
+      if (editReqs.length > 0) {
+        const ids = editReqs.map((e) => e.id);
+        const { data: attachments } = await supabase
+          .from('creative_edit_request_attachments')
+          .select('*')
+          .in('edit_request_id', ids);
+        if (attachments) {
+          const byEditReq = new Map<string, any[]>();
+          attachments.forEach((a) => {
+            const list = byEditReq.get(a.edit_request_id) || [];
+            list.push(a);
+            byEditReq.set(a.edit_request_id, list);
+          });
+          editReqs.forEach((e) => { e.attachments = byEditReq.get(e.id) || []; });
+        }
+      }
+      return editReqs;
+    },
+  });
+
+  const updateStatus = useMutation({
+    mutationFn: async (status: CreativeRequestStatus) => {
+      const { error } = await supabase.from('creative_requests').update({ status }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['creative-request', id] });
+      queryClient.invalidateQueries({ queryKey: ['creative-requests'] });
+      toast({ title: 'Status updated' });
+    },
+  });
+
+  const uploadVersion = async (file: File) => {
+    if (!id) return;
+    setUploading(true);
+    try {
+      const nextVersion = (versions?.length || 0) + 1;
+      const filePath = `creative/${id}/v${nextVersion}_${file.name}`;
+      const { error: uploadError } = await supabase.storage.from('project-files').upload(filePath, file);
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from('project-files').getPublicUrl(filePath);
+
+      const { error } = await supabase.from('creative_request_versions').insert({
+        creative_request_id: id,
+        version_number: nextVersion,
+        file_url: publicUrl,
+        file_name: file.name,
+        notes: versionNotes || null,
+      });
+      if (error) throw error;
+
+      // Mark completed and resolve any open edit requests
+      await supabase.from('creative_requests').update({ status: 'completed' }).eq('id', id);
+      await supabase.from('creative_edit_requests').update({ status: 'resolved' }).eq('creative_request_id', id).eq('status', 'open');
+
+      queryClient.invalidateQueries({ queryKey: ['creative-versions', id] });
+      queryClient.invalidateQueries({ queryKey: ['creative-request', id] });
+      queryClient.invalidateQueries({ queryKey: ['creative-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['creative-edit-requests', id] });
+      setVersionNotes('');
+      toast({ title: `Version ${nextVersion} uploaded & marked complete` });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Upload failed', description: e.message });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const createEditRequest = useMutation({
+    mutationFn: async (data: { name: string; description: string; files: File[] }) => {
+      // Create edit request
+      const { data: editReq, error } = await supabase
+        .from('creative_edit_requests')
+        .insert({ creative_request_id: id, name: data.name, description: data.description || null })
+        .select()
+        .single();
+      if (error) throw error;
+
+      // Upload attachments
+      for (const file of data.files) {
+        const filePath = `creative/${id}/edits/${editReq.id}/${file.name}`;
+        const { error: uploadError } = await supabase.storage.from('project-files').upload(filePath, file);
+        if (uploadError) throw uploadError;
+        const { data: { publicUrl } } = supabase.storage.from('project-files').getPublicUrl(filePath);
+        await supabase.from('creative_edit_request_attachments').insert({
+          edit_request_id: editReq.id,
+          file_url: publicUrl,
+          file_name: file.name,
+          file_size: file.size,
+        });
+      }
+
+      // Set creative request status to edits_requested
+      await supabase.from('creative_requests').update({ status: 'edits_requested' }).eq('id', id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['creative-edit-requests', id] });
+      queryClient.invalidateQueries({ queryKey: ['creative-request', id] });
+      queryClient.invalidateQueries({ queryKey: ['creative-requests'] });
+      setEditDialogOpen(false);
+      toast({ title: 'Edit request submitted' });
+    },
+    onError: (e) => toast({ variant: 'destructive', title: 'Error', description: e.message }),
+  });
+
+  const addTimeEntry = useMutation({
+    mutationFn: async () => {
+      const mins = parseInt(timeMinutes);
+      if (!mins || mins <= 0) throw new Error('Enter valid minutes');
+      const { error } = await supabase.from('creative_time_entries').insert({
+        creative_request_id: id,
+        minutes: mins,
+        notes: timeNotes || null,
+        designer_id: timeDesigner || null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['creative-time-entries', id] });
+      setTimeMinutes('');
+      setTimeNotes('');
+      toast({ title: 'Time logged' });
+    },
+    onError: (e) => toast({ variant: 'destructive', title: 'Error', description: e.message }),
+  });
+
+  const deleteTimeEntry = useMutation({
+    mutationFn: async (entryId: string) => {
+      const { error } = await supabase.from('creative_time_entries').delete().eq('id', entryId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['creative-time-entries', id] });
+      toast({ title: 'Time entry removed' });
+    },
+  });
+
+  const uploadAttachment = async (file: File) => {
+    if (!id) return;
+    setAttachUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'bin';
+      const fileId = crypto.randomUUID();
+      const filePath = `creative-attachments/${id}/${fileId}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from('project-files').upload(filePath, file);
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from('project-files').getPublicUrl(filePath);
+      const { error } = await supabase.from('creative_request_attachments' as any).insert({
+        creative_request_id: id,
+        file_url: publicUrl,
+        file_name: file.name,
+        file_size: file.size,
+        notes: attachNote.trim() || null,
+      });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['creative-request-attachments', id] });
+      setAttachNote('');
+      toast({ title: 'Attachment uploaded' });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Upload failed', description: e.message });
+    } finally {
+      setAttachUploading(false);
+    }
+  };
+
+  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+  if (!request) return <div className="text-center py-12 text-muted-foreground">Request not found.</div>;
+
+  const totalMinutes = timeEntries?.reduce((sum, e) => sum + e.minutes, 0) || 0;
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  const openEditRequests = editRequests?.filter((e) => e.status === 'open') || [];
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Link to={`/admin/projects/${request.project_id}`} className="hover:text-foreground transition-colors">
+              {(request.project as any)?.client?.company_name} → {(request.project as any)?.name}
+            </Link>
+          </div>
+          <h1 className="text-xl font-semibold mt-0.5">{request.title}</h1>
+        </div>
+        <Badge variant="outline" className="text-xs">{creativeRequestTypeLabels[request.type]}</Badge>
+        <Badge className={cn('border', creativeStatusColors[request.status])}>
+          {creativeRequestStatusLabels[request.status]}
+        </Badge>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Main Column */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Details */}
+          <Card>
+            <CardContent className="pt-4 space-y-3">
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <div>
+                  <span className="text-muted-foreground text-xs">Status</span>
+                  <Select value={request.status} onValueChange={(v) => updateStatus.mutate(v as CreativeRequestStatus)}>
+                    <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(creativeRequestStatusLabels).map(([k, v]) => (
+                        <SelectItem key={k} value={k}>{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Assigned To</span>
+                  <p className="mt-1 font-medium">{request.assigned_to || '—'}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Due Date</span>
+                  <p className="mt-1 font-medium">{request.due_date ? format(new Date(request.due_date), 'MMM d, yyyy') : '—'}</p>
+                </div>
+              </div>
+              {request.description && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Description</span>
+                  <p className="text-sm mt-1 whitespace-pre-wrap">{request.description}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Attachments */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Paperclip className="h-4 w-4" />
+                Attachments
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="border border-dashed rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={attachNote}
+                    onChange={(e) => setAttachNote(e.target.value)}
+                    placeholder="Note about this attachment (optional)"
+                    className="h-8 text-sm flex-1"
+                  />
+                  <Button size="sm" variant="outline" disabled={attachUploading} asChild>
+                    <label className="cursor-pointer">
+                      <Upload className="mr-1.5 h-3.5 w-3.5" />
+                      {attachUploading ? 'Uploading...' : 'Upload'}
+                      <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && uploadAttachment(e.target.files[0])} />
+                    </label>
+                  </Button>
+                </div>
+              </div>
+              {!requestAttachments?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No attachments yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {requestAttachments.map((att) => (
+                    <div key={att.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
+                      <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                        <Paperclip className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <a href={att.file_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-primary hover:underline truncate block">
+                          {att.file_name || 'File'}
+                        </a>
+                        {att.notes && <p className="text-xs text-muted-foreground mt-0.5">{att.notes}</p>}
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          {format(new Date(att.created_at), 'MMM d, yyyy h:mm a')}
+                          {att.uploaded_by && ` · ${att.uploaded_by}`}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Version History */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Version History</CardTitle>
+                {(request.status === 'completed' || request.status === 'edits_requested') && (
+                  <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
+                    <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+                    Request Edits
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Upload new version */}
+              <div className="border border-dashed rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={versionNotes}
+                    onChange={(e) => setVersionNotes(e.target.value)}
+                    placeholder="Version notes (optional)"
+                    className="h-8 text-sm flex-1"
+                  />
+                  <Button size="sm" variant="outline" disabled={uploading} asChild>
+                    <label className="cursor-pointer">
+                      <Upload className="mr-1.5 h-3.5 w-3.5" />
+                      {uploading ? 'Uploading...' : 'Upload & Complete'}
+                      <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && uploadVersion(e.target.files[0])} />
+                    </label>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Version list */}
+              {!versions?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No versions yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {versions.map((v) => (
+                    <div key={v.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
+                      <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                        <FileText className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">v{v.version_number}</span>
+                          {v.file_name && (
+                            <a href={v.file_url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline truncate">
+                              {v.file_name}
+                            </a>
+                          )}
+                        </div>
+                        {v.notes && <p className="text-xs text-muted-foreground mt-0.5">{v.notes}</p>}
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          {format(new Date(v.created_at), 'MMM d, yyyy h:mm a')}
+                          {v.uploaded_by && ` · ${v.uploaded_by}`}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Edit Requests */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  Edit Requests
+                  {openEditRequests.length > 0 && (
+                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0">{openEditRequests.length} open</Badge>
+                  )}
+                </CardTitle>
+                <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  New Edit Request
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!editRequests?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No edit requests yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {editRequests.map((er) => (
+                    <div key={er.id} className={cn('p-3 rounded-lg border', er.status === 'open' ? 'bg-destructive/5 border-destructive/20' : 'bg-muted/30')}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium">{er.name}</span>
+                        <Badge variant={er.status === 'open' ? 'destructive' : 'secondary'} className="text-[10px] px-1.5 py-0">
+                          {er.status === 'open' ? 'Open' : 'Resolved'}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground ml-auto">
+                          {format(new Date(er.created_at), 'MMM d, yyyy h:mm a')}
+                        </span>
+                      </div>
+                      {er.description && (
+                        <p className="text-xs text-muted-foreground whitespace-pre-wrap mt-1">{er.description}</p>
+                      )}
+                      {er.attachments && er.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {er.attachments.map((att) => (
+                            <a
+                              key={att.id}
+                              href={att.file_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline bg-primary/5 rounded px-1.5 py-0.5"
+                            >
+                              <Paperclip className="h-2.5 w-2.5" />
+                              {att.file_name}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Sidebar: Time Tracking */}
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Time Tracking
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-center py-2 rounded-lg bg-muted/50">
+                <p className="text-2xl font-bold text-foreground">
+                  {totalHours}h {remainingMinutes}m
+                </p>
+                <p className="text-xs text-muted-foreground">Total logged</p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input type="number" value={timeMinutes} onChange={(e) => setTimeMinutes(e.target.value)} placeholder="Minutes" className="h-8 text-sm w-20" />
+                  <Input value={timeDesigner} onChange={(e) => setTimeDesigner(e.target.value)} placeholder="Designer" className="h-8 text-sm flex-1" />
+                </div>
+                <div className="flex gap-2">
+                  <Input value={timeNotes} onChange={(e) => setTimeNotes(e.target.value)} placeholder="Notes" className="h-8 text-sm flex-1" />
+                  <Button size="sm" className="h-8" onClick={() => addTimeEntry.mutate()} disabled={!timeMinutes}>
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {timeEntries && timeEntries.length > 0 && (
+                <div className="space-y-1 max-h-60 overflow-y-auto">
+                  {timeEntries.map((entry) => (
+                    <div key={entry.id} className="flex items-center gap-2 text-xs p-2 rounded bg-muted/30 group">
+                      <span className="font-medium w-12 shrink-0">{entry.minutes}m</span>
+                      <span className="text-muted-foreground flex-1 truncate">{entry.notes || entry.designer_id || '—'}</span>
+                      <span className="text-muted-foreground shrink-0">{format(new Date(entry.date), 'M/d')}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        onClick={() => deleteTimeEntry.mutate(entry.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <EditRequestDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        onSubmit={(data) => createEditRequest.mutate(data)}
+        isSaving={createEditRequest.isPending}
+      />
+    </div>
+  );
+}

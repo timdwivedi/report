@@ -1,0 +1,643 @@
+import { useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ArrowLeft, Plus, Loader2, Trash2, Pencil, MapPin, Upload, FileText, X } from 'lucide-react';
+import type { Client, ClientContact, ClientAddress } from '@/types/database';
+import ClientFileLibrary from '@/components/clients/ClientFileLibrary';
+
+export default function ClientDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const isNew = id === 'new';
+
+  // ── Client data ──
+  const { data: client, isLoading } = useQuery({
+    queryKey: ['client', id],
+    queryFn: async () => {
+      if (isNew) return null;
+      const { data, error } = await supabase.from('clients').select('*').eq('id', id!).single();
+      if (error) throw error;
+      return data as Client;
+    },
+    enabled: !isNew,
+  });
+
+  // ── Form state ──
+  const [companyName, setCompanyName] = useState('');
+  const [billingLine1, setBillingLine1] = useState('');
+  const [billingLine2, setBillingLine2] = useState('');
+  const [billingCity, setBillingCity] = useState('');
+  const [billingState, setBillingState] = useState('');
+  const [billingZip, setBillingZip] = useState('');
+  const [shippingLine1, setShippingLine1] = useState('');
+  const [shippingLine2, setShippingLine2] = useState('');
+  const [shippingCity, setShippingCity] = useState('');
+  const [shippingState, setShippingState] = useState('');
+  const [shippingZip, setShippingZip] = useState('');
+  const [taxExempt, setTaxExempt] = useState(false);
+  const [resaleCertUrl, setResaleCertUrl] = useState<string | null>(null);
+  const [uploadingCert, setUploadingCert] = useState(false);
+  const [paymentTerms, setPaymentTerms] = useState<string>('prepay');
+  const [isActive, setIsActive] = useState(true);
+  const [initialized, setInitialized] = useState(false);
+
+  // Populate form when client loads
+  if (client && !initialized) {
+    setCompanyName(client.company_name);
+    setBillingLine1(client.billing_address_line1 || '');
+    setBillingLine2(client.billing_address_line2 || '');
+    setBillingCity(client.billing_city || '');
+    setBillingState(client.billing_state || '');
+    setBillingZip(client.billing_zip || '');
+    setShippingLine1(client.shipping_address_line1 || '');
+    setShippingLine2(client.shipping_address_line2 || '');
+    setShippingCity(client.shipping_city || '');
+    setShippingState(client.shipping_state || '');
+    setShippingZip(client.shipping_zip || '');
+    setTaxExempt(client.tax_exempt);
+    setResaleCertUrl(client.resale_cert || null);
+    setPaymentTerms(client.payment_terms || 'prepay');
+    setIsActive(client.is_active);
+    setInitialized(true);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        company_name: companyName,
+        billing_address_line1: billingLine1 || null,
+        billing_address_line2: billingLine2 || null,
+        billing_city: billingCity || null,
+        billing_state: billingState || null,
+        billing_zip: billingZip || null,
+        shipping_address_line1: shippingLine1 || null,
+        shipping_address_line2: shippingLine2 || null,
+        shipping_city: shippingCity || null,
+        shipping_state: shippingState || null,
+        shipping_zip: shippingZip || null,
+        tax_exempt: taxExempt,
+        resale_cert: taxExempt ? resaleCertUrl || null : null,
+        payment_terms: paymentTerms,
+        is_active: isActive,
+      };
+      if (isNew) {
+        const { data, error } = await supabase.from('clients').insert(payload).select().single();
+        if (error) throw error;
+        return data;
+      } else {
+        const { error } = await supabase.from('clients').update(payload).eq('id', id!);
+        if (error) throw error;
+        return null;
+      }
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
+      queryClient.invalidateQueries({ queryKey: ['client', id] });
+      toast({ title: 'Client saved' });
+      if (isNew && data) navigate(`/admin/clients/${data.id}`, { replace: true });
+    },
+    onError: (e) => toast({ variant: 'destructive', title: 'Error', description: e.message }),
+  });
+
+  if (!isNew && isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 max-w-4xl">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <Button variant="ghost" size="icon" onClick={() => navigate('/admin/clients')}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold tracking-tight">
+            {isNew ? 'New Client' : companyName || 'Client'}
+          </h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="active-toggle" className="text-sm text-muted-foreground">Active</Label>
+            <Switch id="active-toggle" checked={isActive} onCheckedChange={setIsActive} />
+          </div>
+          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !companyName}>
+            {saveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isNew ? 'Create Client' : 'Save Changes'}
+          </Button>
+        </div>
+      </div>
+
+      <Tabs defaultValue="details" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="details">Details</TabsTrigger>
+          {!isNew && <TabsTrigger value="contacts">Contacts</TabsTrigger>}
+          {!isNew && <TabsTrigger value="addresses">Address Book</TabsTrigger>}
+          {!isNew && <TabsTrigger value="files">Files</TabsTrigger>}
+        </TabsList>
+
+        {/* ── Details Tab ── */}
+        <TabsContent value="details" className="space-y-6">
+          <div className="rounded-lg border bg-card p-6 space-y-6">
+            <div className="space-y-2">
+              <Label>Company Name *</Label>
+              <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Acme Corporation" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label>Payment Terms</Label>
+                <Select value={paymentTerms} onValueChange={setPaymentTerms}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="prepay">Prepay</SelectItem>
+                    <SelectItem value="net_30">Net 30</SelectItem>
+                    <SelectItem value="net_45">Net 45</SelectItem>
+                    <SelectItem value="net_60">Net 60</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label>Tax Exempt</Label>
+                  <Switch checked={taxExempt} onCheckedChange={setTaxExempt} />
+                </div>
+                {taxExempt && (
+                  <div className="space-y-2">
+                    <Label>Resale Certificate *</Label>
+                    <ResaleCertUpload
+                      clientId={isNew ? undefined : id}
+                      currentUrl={resaleCertUrl}
+                      onUploaded={setResaleCertUrl}
+                      uploading={uploadingCert}
+                      setUploading={setUploadingCert}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Addresses side by side */}
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Billing Address</h3>
+                <AddressInputs
+                  line1={billingLine1} line2={billingLine2} city={billingCity} state={billingState} zip={billingZip}
+                  onLine1={setBillingLine1} onLine2={setBillingLine2} onCity={setBillingCity} onState={setBillingState} onZip={setBillingZip}
+                />
+              </div>
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Shipping Address</h3>
+                <AddressInputs
+                  line1={shippingLine1} line2={shippingLine2} city={shippingCity} state={shippingState} zip={shippingZip}
+                  onLine1={setShippingLine1} onLine2={setShippingLine2} onCity={setShippingCity} onState={setShippingState} onZip={setShippingZip}
+                />
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ── Contacts Tab ── */}
+        {!isNew && (
+          <TabsContent value="contacts">
+            <ContactsTab clientId={id!} />
+          </TabsContent>
+        )}
+
+        {/* ── Address Book Tab ── */}
+        {!isNew && (
+          <TabsContent value="addresses">
+            <AddressBookTab clientId={id!} />
+          </TabsContent>
+        )}
+
+        {/* ── Files Tab ── */}
+        {!isNew && (
+          <TabsContent value="files">
+            <ClientFileLibrary clientId={id!} />
+          </TabsContent>
+        )}
+      </Tabs>
+    </div>
+  );
+}
+
+// ── Address Input Fields ──
+function AddressInputs({ line1, line2, city, state, zip, onLine1, onLine2, onCity, onState, onZip }: {
+  line1: string; line2: string; city: string; state: string; zip: string;
+  onLine1: (v: string) => void; onLine2: (v: string) => void; onCity: (v: string) => void; onState: (v: string) => void; onZip: (v: string) => void;
+}) {
+  return (
+    <>
+      <Input placeholder="Address Line 1" value={line1} onChange={(e) => onLine1(e.target.value)} />
+      <Input placeholder="Address Line 2" value={line2} onChange={(e) => onLine2(e.target.value)} />
+      <div className="grid grid-cols-3 gap-3">
+        <Input placeholder="City" value={city} onChange={(e) => onCity(e.target.value)} />
+        <Input placeholder="State" value={state} onChange={(e) => onState(e.target.value)} />
+        <Input placeholder="ZIP" value={zip} onChange={(e) => onZip(e.target.value)} />
+      </div>
+    </>
+  );
+}
+
+// ── Resale Cert Upload ──
+function ResaleCertUpload({ clientId, currentUrl, onUploaded, uploading, setUploading }: {
+  clientId?: string; currentUrl: string | null; onUploaded: (url: string | null) => void; uploading: boolean; setUploading: (v: boolean) => void;
+}) {
+  const { toast } = useToast();
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `${clientId || 'new'}/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('resale-certs').upload(path, file, { upsert: true });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from('resale-certs').getPublicUrl(path);
+      onUploaded(path);
+      toast({ title: 'Certificate uploaded' });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Upload failed', description: err.message });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  if (currentUrl) {
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/50">
+        <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+        <span className="text-sm truncate flex-1">{currentUrl.split('/').pop()}</span>
+        <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => onUploaded(null)}>
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <label className="flex items-center gap-3 p-3 rounded-lg border border-dashed cursor-pointer hover:bg-muted/50 transition-colors">
+      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4 text-muted-foreground" />}
+      <span className="text-sm text-muted-foreground">{uploading ? 'Uploading...' : 'Upload resale certificate'}</span>
+      <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={handleFileChange} disabled={uploading} />
+    </label>
+  );
+}
+
+// ── Contacts Tab ──
+function ContactsTab({ clientId }: { clientId: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const { data: contacts, isLoading } = useQuery({
+    queryKey: ['client-contacts', clientId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('client_contacts').select('*').eq('client_id', clientId).order('first_name');
+      if (error) throw error;
+      return data as ClientContact[];
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (contactId: string) => {
+      const { error } = await supabase.from('client_contacts').delete().eq('id', contactId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client-contacts', clientId] });
+      toast({ title: 'Contact removed' });
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">Contacts</h3>
+        <Button size="sm" onClick={() => setAdding(true)} disabled={adding}>
+          <Plus className="mr-2 h-4 w-4" /> Add Contact
+        </Button>
+      </div>
+
+      {adding && (
+        <ContactForm
+          clientId={clientId}
+          onDone={() => { setAdding(false); queryClient.invalidateQueries({ queryKey: ['client-contacts', clientId] }); }}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
+      {isLoading ? (
+        <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+      ) : contacts?.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">No contacts yet.</p>
+      ) : (
+        <div className="grid gap-3">
+          {contacts?.map((c) => (
+            editingId === c.id ? (
+              <ContactForm
+                key={c.id}
+                clientId={clientId}
+                contact={c}
+                onDone={() => { setEditingId(null); queryClient.invalidateQueries({ queryKey: ['client-contacts', clientId] }); }}
+                onCancel={() => setEditingId(null)}
+              />
+            ) : (
+              <div key={c.id} className="flex items-center justify-between p-4 rounded-lg border bg-card">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-full bg-accent flex items-center justify-center text-sm font-medium text-accent-foreground">
+                    {(c.first_name || c.name || '?')[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="font-medium">{c.first_name && c.last_name ? `${c.first_name} ${c.last_name}` : c.name}</p>
+                    <p className="text-sm text-muted-foreground">{c.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {(c.contact_type || []).map((t) => (
+                    <Badge key={t} variant="secondary" className="text-xs capitalize">{t}</Badge>
+                  ))}
+                  <Button variant="ghost" size="icon" onClick={() => setEditingId(c.id)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(c.id)}>
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                </div>
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Contact Form (inline) ──
+function ContactForm({ clientId, contact, onDone, onCancel }: {
+  clientId: string; contact?: ClientContact; onDone: () => void; onCancel: () => void;
+}) {
+  const { toast } = useToast();
+  const [firstName, setFirstName] = useState(contact?.first_name || '');
+  const [lastName, setLastName] = useState(contact?.last_name || '');
+  const [email, setEmail] = useState(contact?.email || '');
+  const [contactTypes, setContactTypes] = useState<string[]>(contact?.contact_type || ['order']);
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        client_id: clientId,
+        first_name: firstName,
+        last_name: lastName,
+        name: `${firstName} ${lastName}`.trim(),
+        email,
+        contact_type: contactTypes,
+      };
+      if (contact) {
+        const { error } = await supabase.from('client_contacts').update(payload).eq('id', contact.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('client_contacts').insert(payload);
+        if (error) throw error;
+      }
+      toast({ title: contact ? 'Contact updated' : 'Contact added' });
+      onDone();
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Error', description: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="p-4 rounded-lg border bg-card space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <Label className="text-xs">First Name *</Label>
+          <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Last Name *</Label>
+          <Input value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <Label className="text-xs">Email *</Label>
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs">Contact Type</Label>
+          <div className="flex gap-4 pt-1">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="ct-order"
+                checked={contactTypes.includes('order')}
+                onCheckedChange={(checked) => {
+                  setContactTypes(prev => checked ? [...prev.filter(t => t !== 'order'), 'order'] : prev.filter(t => t !== 'order'));
+                }}
+              />
+              <Label htmlFor="ct-order" className="text-sm font-normal">Order</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="ct-finance"
+                checked={contactTypes.includes('finance')}
+                onCheckedChange={(checked) => {
+                  setContactTypes(prev => checked ? [...prev.filter(t => t !== 'finance'), 'finance'] : prev.filter(t => t !== 'finance'));
+                }}
+              />
+              <Label htmlFor="ct-finance" className="text-sm font-normal">Finance</Label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={saving || !firstName || !lastName || !email}>
+          {saving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+          {contact ? 'Update' : 'Add'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
+      </div>
+    </form>
+  );
+}
+
+// ── Address Book Tab ──
+function AddressBookTab({ clientId }: { clientId: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const { data: addresses, isLoading } = useQuery({
+    queryKey: ['client-addresses', clientId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('client_addresses').select('*').eq('client_id', clientId).order('is_default', { ascending: false });
+      if (error) throw error;
+      return data as ClientAddress[];
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (addrId: string) => {
+      const { error } = await supabase.from('client_addresses').delete().eq('id', addrId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client-addresses', clientId] });
+      toast({ title: 'Address removed' });
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">Address Book</h3>
+        <Button size="sm" onClick={() => setAdding(true)} disabled={adding}>
+          <Plus className="mr-2 h-4 w-4" /> Add Address
+        </Button>
+      </div>
+
+      {adding && (
+        <AddressForm
+          clientId={clientId}
+          onDone={() => { setAdding(false); queryClient.invalidateQueries({ queryKey: ['client-addresses', clientId] }); }}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
+      {isLoading ? (
+        <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+      ) : addresses?.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">No addresses yet.</p>
+      ) : (
+        <div className="grid gap-3">
+          {addresses?.map((a) => (
+            editingId === a.id ? (
+              <AddressForm
+                key={a.id}
+                clientId={clientId}
+                address={a}
+                onDone={() => { setEditingId(null); queryClient.invalidateQueries({ queryKey: ['client-addresses', clientId] }); }}
+                onCancel={() => setEditingId(null)}
+              />
+            ) : (
+              <div key={a.id} className="flex items-start justify-between p-4 rounded-lg border bg-card">
+                <div className="flex items-start gap-3">
+                  <MapPin className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-sm">{a.label}</p>
+                      {a.is_default && <Badge variant="secondary" className="text-xs">Default</Badge>}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {[a.address_line1, a.address_line2].filter(Boolean).join(', ')}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {[a.city, a.state, a.zip].filter(Boolean).join(', ')}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="icon" onClick={() => setEditingId(a.id)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(a.id)}>
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                </div>
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Address Form (inline) ──
+function AddressForm({ clientId, address, onDone, onCancel }: {
+  clientId: string; address?: ClientAddress; onDone: () => void; onCancel: () => void;
+}) {
+  const { toast } = useToast();
+  const [label, setLabel] = useState(address?.label || 'Shipping');
+  const [line1, setLine1] = useState(address?.address_line1 || '');
+  const [line2, setLine2] = useState(address?.address_line2 || '');
+  const [city, setCity] = useState(address?.city || '');
+  const [state, setState] = useState(address?.state || '');
+  const [zip, setZip] = useState(address?.zip || '');
+  const [isDefault, setIsDefault] = useState(address?.is_default || false);
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = { client_id: clientId, label, address_line1: line1 || null, address_line2: line2 || null, city: city || null, state: state || null, zip: zip || null, is_default: isDefault };
+      if (address) {
+        const { error } = await supabase.from('client_addresses').update(payload).eq('id', address.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('client_addresses').insert(payload);
+        if (error) throw error;
+      }
+      toast({ title: address ? 'Address updated' : 'Address added' });
+      onDone();
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Error', description: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="p-4 rounded-lg border bg-card space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <Label className="text-xs">Label</Label>
+          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Warehouse, Office" />
+        </div>
+        <div className="flex items-center gap-2 pt-5">
+          <Switch checked={isDefault} onCheckedChange={setIsDefault} id="default-addr" />
+          <Label htmlFor="default-addr" className="text-sm">Default address</Label>
+        </div>
+      </div>
+      <Input placeholder="Address Line 1" value={line1} onChange={(e) => setLine1(e.target.value)} />
+      <Input placeholder="Address Line 2" value={line2} onChange={(e) => setLine2(e.target.value)} />
+      <div className="grid grid-cols-3 gap-3">
+        <Input placeholder="City" value={city} onChange={(e) => setCity(e.target.value)} />
+        <Input placeholder="State" value={state} onChange={(e) => setState(e.target.value)} />
+        <Input placeholder="ZIP" value={zip} onChange={(e) => setZip(e.target.value)} />
+      </div>
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={saving}>
+          {saving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+          {address ? 'Update' : 'Add'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
+      </div>
+    </form>
+  );
+}

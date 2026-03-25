@@ -1,0 +1,85 @@
+{
+  "timestamp": "2026-02-21T14:59:01.561Z",
+  "baseUrl": "http://localhost:3099",
+  "screenshotDir": "docs/screenshots",
+  "pages": [
+    {
+      "route": "/",
+      "filename": "landing.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/calculator",
+      "filename": "calculator.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/dashboard",
+      "filename": "dashboard.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/dashboard/analytics",
+      "filename": "dashboard-analytics.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/dashboard/clients",
+      "filename": "dashboard-clients.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/dashboard/commissions",
+      "filename": "dashboard-commissions.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/dashboard/orders",
+      "filename": "dashboard-orders.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/dashboard/programs",
+      "filename": "dashboard-programs.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/dashboard/projects",
+      "filename": "dashboard-projects.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/dashboard/settings",
+      "filename": "dashboard-settings.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/login",
+      "filename": "login.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/manifesto",
+      "filename": "manifesto.png",
+      "status": "ok",
+      "errors": null
+    },
+    {
+      "route": "/signup",
+      "filename": "signup.png",
+      "status": "ok",
+      "errors": null
+    }
+  ]
+}

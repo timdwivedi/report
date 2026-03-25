@@ -1,0 +1,511 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/hooks/use-toast';
+import { Pencil, Loader2, Package, Plus, ExternalLink, Trash2 } from 'lucide-react';
+import type { Order, OrderStatus, Project, Shipment } from '@/types/database';
+import { orderStatusLabels } from '@/types/database';
+
+const statusColors: Record<OrderStatus, string> = {
+  order_entry_needed: 'bg-warning/10 text-warning border-warning/20',
+  in_production: 'bg-primary/10 text-primary border-primary/20',
+  shipped: 'bg-success/10 text-success border-success/20',
+};
+
+export default function OrdersPage() {
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: orders, isLoading } = useQuery({
+    queryKey: ['orders'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, project:projects(*, client:clients(*))')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as unknown as (Order & { project: Project & { client: { company_name: string } } })[];
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (order: Partial<Order>) => {
+      const { error } = await supabase
+        .from('orders')
+        .update(order)
+        .eq('id', order.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setEditingOrder(null);
+      toast({ title: 'Order updated successfully' });
+    },
+    onError: (error) => {
+      toast({
+        variant: 'destructive',
+        title: 'Error updating order',
+        description: error.message,
+      });
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Orders</h1>
+        <p className="text-muted-foreground">
+          Track and manage all orders
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : orders?.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          No orders yet. Orders are created when presentation items are approved.
+        </div>
+      ) : (
+        <div className="rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order #</TableHead>
+                <TableHead>Project</TableHead>
+                <TableHead>Client</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Ship Date</TableHead>
+                <TableHead className="w-[80px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {orders?.map((order) => (
+                <TableRow
+                  key={order.id}
+                  className="cursor-pointer"
+                  onClick={() => setSelectedOrder(order)}
+                >
+                  <TableCell className="font-mono text-sm">
+                    {order.id.slice(0, 8).toUpperCase()}
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    {order.project?.name || '—'}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {order.project?.client?.company_name || '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={statusColors[order.status]}>
+                      {orderStatusLabels[order.status]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {order.estimated_ship_date
+                      ? new Date(order.estimated_ship_date).toLocaleDateString()
+                      : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingOrder(order);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      <Dialog open={!!editingOrder} onOpenChange={() => setEditingOrder(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Order</DialogTitle>
+          </DialogHeader>
+          {editingOrder && (
+            <OrderForm
+              order={editingOrder}
+              onSubmit={(data) => updateMutation.mutate(data)}
+              isLoading={updateMutation.isPending}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Sheet open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
+        <SheetContent className="sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>
+              Order #{selectedOrder?.id.slice(0, 8).toUpperCase()}
+            </SheetTitle>
+          </SheetHeader>
+          {selectedOrder && <OrderDetails order={selectedOrder} />}
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+interface OrderFormProps {
+  order: Order;
+  onSubmit: (data: Partial<Order>) => void;
+  isLoading: boolean;
+}
+
+function OrderForm({ order, onSubmit, isLoading }: OrderFormProps) {
+  const [status, setStatus] = useState<OrderStatus>(order.status);
+  const [invoiceUrl, setInvoiceUrl] = useState(order.invoice_url || '');
+  const [estimatedShipDate, setEstimatedShipDate] = useState(order.estimated_ship_date || '');
+  const [shipTo, setShipTo] = useState({
+    line1: order.ship_to_address_line1 || '',
+    line2: order.ship_to_address_line2 || '',
+    city: order.ship_to_city || '',
+    state: order.ship_to_state || '',
+    zip: order.ship_to_zip || '',
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      id: order.id,
+      status,
+      invoice_url: invoiceUrl || null,
+      estimated_ship_date: estimatedShipDate || null,
+      ship_to_address_line1: shipTo.line1 || null,
+      ship_to_address_line2: shipTo.line2 || null,
+      ship_to_city: shipTo.city || null,
+      ship_to_state: shipTo.state || null,
+      ship_to_zip: shipTo.zip || null,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label>Status</Label>
+        <Select value={status} onValueChange={(v) => setStatus(v as OrderStatus)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(orderStatusLabels).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Invoice URL</Label>
+        <Input
+          type="url"
+          value={invoiceUrl}
+          onChange={(e) => setInvoiceUrl(e.target.value)}
+          placeholder="https://..."
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Estimated Ship Date</Label>
+        <Input
+          type="date"
+          value={estimatedShipDate}
+          onChange={(e) => setEstimatedShipDate(e.target.value)}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Ship-To Address</Label>
+        <Input
+          placeholder="Address Line 1"
+          value={shipTo.line1}
+          onChange={(e) => setShipTo((p) => ({ ...p, line1: e.target.value }))}
+        />
+        <Input
+          placeholder="Address Line 2"
+          value={shipTo.line2}
+          onChange={(e) => setShipTo((p) => ({ ...p, line2: e.target.value }))}
+        />
+        <div className="grid grid-cols-3 gap-2">
+          <Input
+            placeholder="City"
+            value={shipTo.city}
+            onChange={(e) => setShipTo((p) => ({ ...p, city: e.target.value }))}
+          />
+          <Input
+            placeholder="State"
+            value={shipTo.state}
+            onChange={(e) => setShipTo((p) => ({ ...p, state: e.target.value }))}
+          />
+          <Input
+            placeholder="ZIP"
+            value={shipTo.zip}
+            onChange={(e) => setShipTo((p) => ({ ...p, zip: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      <Button type="submit" className="w-full" disabled={isLoading}>
+        {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        Update Order
+      </Button>
+    </form>
+  );
+}
+
+function OrderDetails({ order }: { order: Order }) {
+  const [isAddingShipment, setIsAddingShipment] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: shipments, isLoading } = useQuery({
+    queryKey: ['shipments', order.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('shipments')
+        .select('*')
+        .eq('order_id', order.id)
+        .order('shipped_date', { ascending: false });
+      if (error) throw error;
+      return data as Shipment[];
+    },
+  });
+
+  const addShipmentMutation = useMutation({
+    mutationFn: async (shipment: Partial<Shipment>) => {
+      const { error } = await supabase.from('shipments').insert({
+        ...shipment,
+        order_id: order.id,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shipments', order.id] });
+      setIsAddingShipment(false);
+      toast({ title: 'Shipment added' });
+    },
+  });
+
+  const deleteShipmentMutation = useMutation({
+    mutationFn: async (shipmentId: string) => {
+      const { error } = await supabase.from('shipments').delete().eq('id', shipmentId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shipments', order.id] });
+      toast({ title: 'Shipment removed' });
+    },
+  });
+
+  return (
+    <div className="mt-6 space-y-6">
+      <div className="grid gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge variant="outline" className={statusColors[order.status]}>
+              {orderStatusLabels[order.status]}
+            </Badge>
+          </CardContent>
+        </Card>
+
+        {order.invoice_url && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Invoice
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <a
+                href={order.invoice_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline flex items-center gap-1"
+              >
+                View Invoice <ExternalLink className="h-3 w-3" />
+              </a>
+            </CardContent>
+          </Card>
+        )}
+
+        {order.ship_to_address_line1 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Ship To
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm">
+              <p>{order.ship_to_address_line1}</p>
+              {order.ship_to_address_line2 && <p>{order.ship_to_address_line2}</p>}
+              <p>
+                {order.ship_to_city}, {order.ship_to_state} {order.ship_to_zip}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold flex items-center gap-2">
+          <Package className="h-4 w-4" />
+          Shipments
+        </h3>
+        <Button size="sm" onClick={() => setIsAddingShipment(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add Shipment
+        </Button>
+      </div>
+
+      {isAddingShipment && (
+        <ShipmentForm
+          onSubmit={(data) => addShipmentMutation.mutate(data)}
+          onCancel={() => setIsAddingShipment(false)}
+          isLoading={addShipmentMutation.isPending}
+        />
+      )}
+
+      {isLoading ? (
+        <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+      ) : shipments?.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No shipments yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {shipments?.map((shipment) => (
+            <div
+              key={shipment.id}
+              className="flex items-start justify-between p-3 rounded-lg border bg-muted/50"
+            >
+              <div>
+                <p className="font-medium">{shipment.carrier || 'Unknown Carrier'}</p>
+                <p className="text-sm text-muted-foreground font-mono">
+                  {shipment.tracking_number || 'No tracking'}
+                </p>
+                {shipment.shipped_date && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Shipped: {new Date(shipment.shipped_date).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => deleteShipmentMutation.mutate(shipment.id)}
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ShipmentFormProps {
+  onSubmit: (data: Partial<Shipment>) => void;
+  onCancel: () => void;
+  isLoading: boolean;
+}
+
+function ShipmentForm({ onSubmit, onCancel, isLoading }: ShipmentFormProps) {
+  const [carrier, setCarrier] = useState('');
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [shippedDate, setShippedDate] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      carrier: carrier || null,
+      tracking_number: trackingNumber || null,
+      shipped_date: shippedDate || null,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 p-4 rounded-lg border">
+      <div className="space-y-2">
+        <Label>Carrier</Label>
+        <Input
+          value={carrier}
+          onChange={(e) => setCarrier(e.target.value)}
+          placeholder="UPS, FedEx, USPS..."
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>Tracking Number</Label>
+        <Input
+          value={trackingNumber}
+          onChange={(e) => setTrackingNumber(e.target.value)}
+          placeholder="1Z..."
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>Shipped Date</Label>
+        <Input
+          type="date"
+          value={shippedDate}
+          onChange={(e) => setShippedDate(e.target.value)}
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button type="submit" disabled={isLoading}>
+          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Add Shipment
+        </Button>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}

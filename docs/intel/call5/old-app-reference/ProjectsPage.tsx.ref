@@ -1,0 +1,313 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/hooks/use-toast';
+import { Plus, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import type { Project, Client, ProjectStatus } from '@/types/database';
+import { projectStatusLabels } from '@/types/database';
+
+const statusColors: Record<ProjectStatus, string> = {
+  opportunity: 'bg-info/10 text-info border-info/20',
+  qualifying: 'bg-warning/10 text-warning border-warning/20',
+  curating: 'bg-primary/10 text-primary border-primary/20',
+  in_design: 'bg-purple/10 text-purple border-purple/20',
+  presenting: 'bg-accent-foreground/10 text-accent-foreground border-accent-foreground/20',
+  client_review: 'bg-success/10 text-success border-success/20',
+  ordered: 'bg-muted text-muted-foreground',
+  cancelled: 'bg-destructive/10 text-destructive border-destructive/20',
+};
+
+export default function ProjectsPage() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'all'>('all');
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  const { data: projects, isLoading } = useQuery({
+    queryKey: ['projects'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*, client:clients(*)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as unknown as (Project & { client: Client })[];
+    },
+  });
+
+  const { data: clients } = useQuery({
+    queryKey: ['clients'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .order('company_name');
+      if (error) throw error;
+      return data as Client[];
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async (project: Partial<Project>) => {
+      if (project.id) {
+        const { error } = await supabase
+          .from('projects')
+          .update(project as any)
+          .eq('id', project.id);
+        if (error) throw error;
+      } else {
+        const { name, client_id, status, internal_notes, client_notes } = project;
+        if (!name || !client_id) throw new Error('Name and client are required');
+        const { error } = await supabase.from('projects').insert({
+          name,
+          client_id,
+          status: (status ?? 'opportunity') as any,
+          internal_notes: internal_notes ?? null,
+          client_notes: client_notes ?? null,
+        });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setIsOpen(false);
+      setEditingProject(null);
+      toast({ title: 'Project saved successfully' });
+    },
+    onError: (error) => {
+      toast({
+        variant: 'destructive',
+        title: 'Error saving project',
+        description: error.message,
+      });
+    },
+  });
+
+  const handleEdit = (project: Project) => {
+    setEditingProject(project);
+    setIsOpen(true);
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (!open) setEditingProject(null);
+  };
+
+  const filteredProjects = projects?.filter(
+    (p) => statusFilter === 'all' || p.status === statusFilter
+  );
+
+  const statusCounts = projects?.reduce(
+    (acc, p) => {
+      acc[p.status] = (acc[p.status] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
+          <p className="text-muted-foreground">
+            Manage client projects and presentations
+          </p>
+        </div>
+        <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              New Project
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>
+                {editingProject ? 'Edit Project' : 'New Project'}
+              </DialogTitle>
+            </DialogHeader>
+            <ProjectForm
+              project={editingProject}
+              clients={clients || []}
+              onSubmit={(data) => saveMutation.mutate(data)}
+              isLoading={saveMutation.isPending}
+            />
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Status filter tabs */}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant={statusFilter === 'all' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setStatusFilter('all')}
+        >
+          All {projects?.length ? `(${projects.length})` : ''}
+        </Button>
+        {(Object.keys(projectStatusLabels) as ProjectStatus[]).map((status) => (
+          <Button
+            key={status}
+            variant={statusFilter === status ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setStatusFilter(status)}
+          >
+            {projectStatusLabels[status]} {statusCounts?.[status] ? `(${statusCounts[status]})` : '(0)'}
+          </Button>
+        ))}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : filteredProjects?.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          {statusFilter === 'all'
+            ? 'No projects yet. Create your first project to get started.'
+            : `No projects with status "${projectStatusLabels[statusFilter]}".`}
+        </div>
+      ) : (
+        <div className="rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Project</TableHead>
+                <TableHead>Client</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Created</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredProjects?.map((project) => (
+                <TableRow
+                  key={project.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/admin/projects/${project.id}`)}
+                >
+                  <TableCell className="font-medium">{project.name}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {project.client?.company_name || '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={statusColors[project.status]}>
+                      {projectStatusLabels[project.status]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {new Date(project.created_at).toLocaleDateString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ProjectFormProps {
+  project: Project | null;
+  clients: Client[];
+  onSubmit: (data: Partial<Project>) => void;
+  isLoading: boolean;
+}
+
+function ProjectForm({ project, clients, onSubmit, isLoading }: ProjectFormProps) {
+  const [name, setName] = useState(project?.name || '');
+  const [clientId, setClientId] = useState(project?.client_id || '');
+  const [status, setStatus] = useState<ProjectStatus>(project?.status || 'opportunity');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      ...(project?.id && { id: project.id }),
+      name,
+      client_id: clientId,
+      status,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="name">Project Name *</Label>
+        <Input
+          id="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="client">Client *</Label>
+        <Select value={clientId} onValueChange={setClientId} required>
+          <SelectTrigger>
+            <SelectValue placeholder="Select a client" />
+          </SelectTrigger>
+          <SelectContent>
+            {clients.map((client) => (
+              <SelectItem key={client.id} value={client.id}>
+                {client.company_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="status">Status</Label>
+        <Select value={status} onValueChange={(v) => setStatus(v as ProjectStatus)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(projectStatusLabels).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <Button type="submit" className="w-full" disabled={isLoading || !name || !clientId}>
+        {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        {project ? 'Update Project' : 'Create Project'}
+      </Button>
+    </form>
+  );
+}

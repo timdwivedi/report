@@ -1,0 +1,1018 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
+import { Plus, Pencil, Loader2, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import type {
+  Decoration,
+  DecorationPriceBreak,
+  DecorationRunCharge,
+  DecorationSetupCharge,
+} from '@/types/database';
+import { decorationTypeLabels } from '@/types/database';
+
+interface RunChargeQtyBreakRow {
+  min_qty: string;
+  max_qty: string;
+  cost: string;
+  sale_price: string;
+}
+
+interface SetupChargeRow {
+  id?: string;
+  name: string;
+  cost: string;
+  sale_price: string;
+  free_above_qty: string;
+}
+
+interface RunChargeRow {
+  id?: string;
+  name: string;
+  cost: string;
+  sale_price: string;
+  qty_breaks: RunChargeQtyBreakRow[];
+  setup_charges: SetupChargeRow[];
+}
+
+interface PriceBreakRow {
+  id?: string;
+  min_quantity: string;
+  max_quantity: string;
+  color_count: string;
+  unit_price: string;
+}
+
+export default function DecorationsPage() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: decorations, isLoading } = useQuery({
+    queryKey: ['decorations'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('decorations')
+        .select('*, decoration_price_breaks(*), decoration_run_charges(*), decoration_setup_charges(*)')
+        .order('name');
+      if (error) throw error;
+      return data as unknown as (Decoration & {
+        decoration_price_breaks: DecorationPriceBreak[];
+        decoration_run_charges: DecorationRunCharge[];
+        decoration_setup_charges: DecorationSetupCharge[];
+      })[];
+    },
+  });
+
+  const handleEdit = (dec: Decoration) => {
+    setEditingId(dec.id);
+    setIsOpen(true);
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (!open) setEditingId(null);
+  };
+
+  const editingDecoration = editingId
+    ? decorations?.find((d) => d.id === editingId)
+    : null;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Decorations</h1>
+          <p className="text-muted-foreground">
+            Manage decoration types, price breaks, and charges.
+          </p>
+        </div>
+        <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Decoration
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {editingDecoration ? 'Edit Decoration' : 'Create Decoration'}
+              </DialogTitle>
+            </DialogHeader>
+            <DecorationForm
+              decoration={editingDecoration || null}
+              onClose={() => handleOpenChange(false)}
+            />
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : decorations?.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground border rounded-lg">
+          No decorations yet. Create one to get started.
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {decorations?.map((dec) => (
+            <Card key={dec.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => handleEdit(dec)}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">{dec.name}</CardTitle>
+                  <Badge variant="outline">
+                    {decorationTypeLabels[dec.decoration_type] || dec.decoration_type}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <p>{dec.decoration_price_breaks?.length || 0} price breaks</p>
+                  <p>{dec.decoration_run_charges?.length || 0} run charges</p>
+                  <p>{dec.decoration_setup_charges?.length || 0} setup charges</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DecorationForm({
+  decoration,
+  onClose,
+}: {
+  decoration: (Decoration & {
+    decoration_price_breaks?: DecorationPriceBreak[];
+    decoration_run_charges?: DecorationRunCharge[];
+    decoration_setup_charges?: DecorationSetupCharge[];
+  }) | null;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(decoration?.name || '');
+  const [decorationType, setDecorationType] = useState(decoration?.decoration_type || 'print');
+  // Matrix state: rows = qty ranges, columns = color/stitch counts, cells = prices
+  const initMatrix = () => {
+    const breaks = decoration?.decoration_price_breaks || [];
+    const rangeMap = new Map<string, { min: string; max: string }>();
+    const colSet = new Set<string>();
+    const matrix: Record<string, Record<string, string>> = {};
+
+    for (const pb of breaks) {
+      const key = `${pb.min_quantity}-${pb.max_quantity}`;
+      rangeMap.set(key, { min: pb.min_quantity.toString(), max: pb.max_quantity.toString() });
+      colSet.add(pb.color_count.toString());
+      if (!matrix[key]) matrix[key] = {};
+      matrix[key][pb.color_count.toString()] = pb.unit_price.toString();
+    }
+
+    const ranges = Array.from(rangeMap.values()).sort((a, b) => parseInt(a.min) - parseInt(b.min));
+    const cols = Array.from(colSet).sort((a, b) => parseInt(a) - parseInt(b));
+    return { ranges, cols, matrix };
+  };
+
+  const init = initMatrix();
+  const [qtyRanges, setQtyRanges] = useState<{ min: string; max: string }[]>(init.ranges);
+  const [colorCounts, setColorCounts] = useState<string[]>(init.cols);
+  const [priceMatrix, setPriceMatrix] = useState<Record<string, Record<string, string>>>(init.matrix);
+
+  // Group setup charges by run_charge_id
+  const allSetupCharges = decoration?.decoration_setup_charges || [];
+  const decoLevelSetups = allSetupCharges.filter((sc) => !sc.run_charge_id);
+
+  const [runCharges, setRunCharges] = useState<RunChargeRow[]>(
+    decoration?.decoration_run_charges?.map((rc) => ({
+      id: rc.id,
+      name: rc.name,
+      cost: rc.cost.toString(),
+      sale_price: rc.sale_price.toString(),
+      qty_breaks: (rc.qty_breaks || []).map((qb: any) => ({
+        min_qty: qb.min_qty?.toString() || '',
+        max_qty: qb.max_qty?.toString() || '',
+        cost: qb.cost?.toString() || '',
+        sale_price: qb.sale_price?.toString() || '',
+      })),
+      setup_charges: allSetupCharges
+        .filter((sc) => sc.run_charge_id === rc.id)
+        .map((sc) => ({
+          id: sc.id,
+          name: sc.name,
+          cost: sc.cost.toString(),
+          sale_price: sc.sale_price.toString(),
+          free_above_qty: sc.free_above_qty?.toString() || '',
+        })),
+    })) || []
+  );
+
+  const [decorationSetupCharges, setDecorationSetupCharges] = useState<SetupChargeRow[]>(
+    decoLevelSetups.map((sc) => ({
+      id: sc.id,
+      name: sc.name,
+      cost: sc.cost.toString(),
+      sale_price: sc.sale_price.toString(),
+      free_above_qty: sc.free_above_qty?.toString() || '',
+    }))
+  );
+
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const handleSave = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      let decId = decoration?.id;
+
+      if (decId) {
+        const { error } = await supabase
+          .from('decorations')
+          .update({ name, decoration_type: decorationType })
+          .eq('id', decId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase
+          .from('decorations')
+          .insert({ name, decoration_type: decorationType })
+          .select()
+          .single();
+        if (error) throw error;
+        decId = data.id;
+      }
+
+      // Replace price breaks from matrix
+      await supabase.from('decoration_price_breaks').delete().eq('decoration_id', decId);
+      const flatBreaks: { decoration_id: string; min_quantity: number; max_quantity: number; color_count: number; unit_price: number; sort_order: number }[] = [];
+      let sortIdx = 0;
+      for (const range of qtyRanges) {
+        for (const col of colorCounts) {
+          const key = `${range.min}-${range.max}`;
+          const val = parseFloat(priceMatrix[key]?.[col] || '0');
+          if (val > 0) {
+            flatBreaks.push({
+              decoration_id: decId!,
+              min_quantity: parseInt(range.min) || 0,
+              max_quantity: parseInt(range.max) || 0,
+              color_count: parseInt(col) || 1,
+              unit_price: val,
+              sort_order: sortIdx++,
+            });
+          }
+        }
+      }
+      if (flatBreaks.length > 0) {
+        const { error } = await supabase.from('decoration_price_breaks').insert(flatBreaks);
+        if (error) throw error;
+      }
+
+      // Delete old setup charges first (they reference run charges via FK)
+      await supabase.from('decoration_setup_charges').delete().eq('decoration_id', decId);
+      // Delete old run charges
+      await supabase.from('decoration_run_charges').delete().eq('decoration_id', decId);
+
+      // Insert new run charges and get their IDs
+      const insertedRunChargeIds: string[] = [];
+      if (runCharges.length > 0) {
+        const { data: insertedRCs, error } = await supabase.from('decoration_run_charges').insert(
+          runCharges.map((rc, i) => ({
+            decoration_id: decId!,
+            name: rc.name,
+            cost: parseFloat(rc.cost) || 0,
+            sale_price: parseFloat(rc.sale_price) || 0,
+            qty_breaks: (rc.qty_breaks || []).map((qb) => ({
+              min_qty: parseInt(qb.min_qty) || 0,
+              max_qty: parseInt(qb.max_qty) || 0,
+              cost: parseFloat(qb.cost) || 0,
+              sale_price: parseFloat(qb.sale_price) || 0,
+            })),
+            sort_order: i,
+          }))
+        ).select('id');
+        if (error) throw error;
+        insertedRCs?.forEach((rc) => insertedRunChargeIds.push(rc.id));
+      }
+
+      // Collect all setup charges: decoration-level + run-charge-level
+      const allNewSetups: { decoration_id: string; name: string; cost: number; sale_price: number; free_above_qty: number | null; run_charge_id: string | null; sort_order: number }[] = [];
+
+      // Decoration-level setups
+      decorationSetupCharges.forEach((sc, i) => {
+        allNewSetups.push({
+          decoration_id: decId!,
+          name: sc.name,
+          cost: parseFloat(sc.cost) || 0,
+          sale_price: parseFloat(sc.sale_price) || 0,
+          free_above_qty: sc.free_above_qty && parseInt(sc.free_above_qty) > 0 ? parseInt(sc.free_above_qty) : null,
+          run_charge_id: null,
+          sort_order: i,
+        });
+      });
+
+      // Run-charge-level setups
+      runCharges.forEach((rc, rcIdx) => {
+        const rcId = insertedRunChargeIds[rcIdx];
+        if (!rcId) return;
+        (rc.setup_charges || []).forEach((sc, scIdx) => {
+          allNewSetups.push({
+            decoration_id: decId!,
+            name: sc.name,
+            cost: parseFloat(sc.cost) || 0,
+            sale_price: parseFloat(sc.sale_price) || 0,
+            free_above_qty: sc.free_above_qty && parseInt(sc.free_above_qty) > 0 ? parseInt(sc.free_above_qty) : null,
+            run_charge_id: rcId,
+            sort_order: scIdx,
+          });
+        });
+      });
+
+      if (allNewSetups.length > 0) {
+        const { error } = await supabase.from('decoration_setup_charges').insert(allNewSetups);
+        if (error) throw error;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['decorations'] });
+      toast({ title: 'Decoration saved' });
+      onClose();
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Error', description: error.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Tabs defaultValue="basics" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="basics">Basics</TabsTrigger>
+        <TabsTrigger value="price-breaks">Price Breaks</TabsTrigger>
+        <TabsTrigger value="charges">Run Charges & Setups</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="basics" className="space-y-4">
+        <div className="space-y-2">
+          <Label>Name</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Screen Printing" />
+        </div>
+        <div className="space-y-2">
+          <Label>Decoration Type</Label>
+          <Select value={decorationType} onValueChange={setDecorationType}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="print">Print</SelectItem>
+              <SelectItem value="embroidery">Embroidery</SelectItem>
+              <SelectItem value="other">Other</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="price-breaks" className="space-y-4">
+        <div className="flex items-center justify-between">
+          <Label className="text-base font-semibold">Price Break Matrix</Label>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const next = colorCounts.length > 0 ? (parseInt(colorCounts[colorCounts.length - 1]) + 1).toString() : '1';
+                setColorCounts([...colorCounts, next]);
+              }}
+            >
+              <Plus className="mr-1 h-3 w-3" /> Add {decorationType === 'embroidery' ? 'Stitch Count' : 'Color'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const lastMax = qtyRanges.length > 0 ? parseInt(qtyRanges[qtyRanges.length - 1].max) + 1 : 1;
+                setQtyRanges([...qtyRanges, { min: lastMax.toString(), max: '9999' }]);
+              }}
+            >
+              <Plus className="mr-1 h-3 w-3" /> Add Qty Row
+            </Button>
+          </div>
+        </div>
+
+        {qtyRanges.length === 0 && colorCounts.length === 0 ? (
+          <div className="text-center py-6 text-muted-foreground border rounded-lg">
+            No price breaks. Add quantity rows and {decorationType === 'embroidery' ? 'stitch counts' : 'color counts'} to build the matrix.
+          </div>
+        ) : (
+          <div className="rounded-lg border overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[160px]">Qty Range</TableHead>
+                  {colorCounts.map((col, ci) => (
+                    <TableHead key={ci} className="text-center min-w-[100px]">
+                      <div className="flex items-center justify-center gap-1">
+                        {decorationType === 'embroidery' ? (
+                          <Input
+                            type="number"
+                            className="h-7 w-20 text-center text-xs"
+                            value={col}
+                            onChange={(e) => {
+                              const oldCol = col;
+                              const newCol = e.target.value;
+                              const updated = [...colorCounts];
+                              updated[ci] = newCol;
+                              setColorCounts(updated);
+                              // Update matrix keys
+                              const newMatrix = { ...priceMatrix };
+                              for (const key of Object.keys(newMatrix)) {
+                                if (newMatrix[key][oldCol] !== undefined) {
+                                  newMatrix[key][newCol] = newMatrix[key][oldCol];
+                                  delete newMatrix[key][oldCol];
+                                }
+                              }
+                              setPriceMatrix(newMatrix);
+                            }}
+                          />
+                        ) : (
+                          <span>{col} Color{parseInt(col) !== 1 ? 's' : ''}</span>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => {
+                            setColorCounts(colorCounts.filter((_, j) => j !== ci));
+                            const newMatrix = { ...priceMatrix };
+                            for (const key of Object.keys(newMatrix)) {
+                              delete newMatrix[key][col];
+                            }
+                            setPriceMatrix(newMatrix);
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                      </div>
+                      {decorationType === 'embroidery' && <span className="text-xs text-muted-foreground">stitches</span>}
+                    </TableHead>
+                  ))}
+                  <TableHead className="w-[40px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {qtyRanges.map((range, ri) => {
+                  const rowKey = `${range.min}-${range.max}`;
+                  return (
+                    <TableRow key={ri}>
+                      <TableCell className="p-1">
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            className="h-8 w-16 text-center"
+                            value={range.min}
+                            onChange={(e) => {
+                              const oldKey = rowKey;
+                              const newRanges = [...qtyRanges];
+                              newRanges[ri] = { ...newRanges[ri], min: e.target.value };
+                              setQtyRanges(newRanges);
+                              const newKey = `${e.target.value}-${range.max}`;
+                              if (oldKey !== newKey && priceMatrix[oldKey]) {
+                                const newMatrix = { ...priceMatrix, [newKey]: priceMatrix[oldKey] };
+                                delete newMatrix[oldKey];
+                                setPriceMatrix(newMatrix);
+                              }
+                            }}
+                          />
+                          <span className="text-muted-foreground">–</span>
+                          <Input
+                            type="number"
+                            className="h-8 w-16 text-center"
+                            value={range.max}
+                            onChange={(e) => {
+                              const oldKey = rowKey;
+                              const newRanges = [...qtyRanges];
+                              newRanges[ri] = { ...newRanges[ri], max: e.target.value };
+                              setQtyRanges(newRanges);
+                              const newKey = `${range.min}-${e.target.value}`;
+                              if (oldKey !== newKey && priceMatrix[oldKey]) {
+                                const newMatrix = { ...priceMatrix, [newKey]: priceMatrix[oldKey] };
+                                delete newMatrix[oldKey];
+                                setPriceMatrix(newMatrix);
+                              }
+                            }}
+                          />
+                        </div>
+                      </TableCell>
+                      {colorCounts.map((col) => (
+                        <TableCell key={col} className="p-1">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            className="h-8 text-center"
+                            value={priceMatrix[rowKey]?.[col] || ''}
+                            placeholder="0.00"
+                            onChange={(e) => {
+                              const newMatrix = { ...priceMatrix };
+                              if (!newMatrix[rowKey]) newMatrix[rowKey] = {};
+                              newMatrix[rowKey] = { ...newMatrix[rowKey], [col]: e.target.value };
+                              setPriceMatrix(newMatrix);
+                            }}
+                          />
+                        </TableCell>
+                      ))}
+                      <TableCell className="p-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            const newMatrix = { ...priceMatrix };
+                            delete newMatrix[rowKey];
+                            setPriceMatrix(newMatrix);
+                            setQtyRanges(qtyRanges.filter((_, j) => j !== ri));
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </TabsContent>
+
+      <TabsContent value="charges" className="space-y-6">
+        {/* Decoration-level setup charges */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-base font-semibold">Decoration Setup Charges</Label>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDecorationSetupCharges([...decorationSetupCharges, { name: '', cost: '', sale_price: '', free_above_qty: '' }])}
+            >
+              <Plus className="mr-1 h-3 w-3" /> Add Setup
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Setup charges for the primary decoration (e.g., screen setup).</p>
+          <SetupChargeTable charges={decorationSetupCharges} onChange={setDecorationSetupCharges} />
+        </div>
+
+        <div className="border-t pt-4" />
+
+        {/* Run charges with nested setup charges */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-base font-semibold">Run Charges</Label>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRunCharges([...runCharges, { name: '', cost: '', sale_price: '', qty_breaks: [], setup_charges: [] }])}
+            >
+              <Plus className="mr-1 h-3 w-3" /> Add Charge
+            </Button>
+          </div>
+          <RunChargeTable charges={runCharges} onChange={setRunCharges} />
+        </div>
+      </TabsContent>
+
+      <div className="flex justify-end gap-2 pt-4 border-t">
+        <Button variant="outline" onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSave} disabled={saving || !name.trim()}>
+          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {decoration ? 'Update' : 'Create'}
+        </Button>
+      </div>
+    </Tabs>
+  );
+}
+
+function RunChargeTable({
+  charges,
+  onChange,
+}: {
+  charges: RunChargeRow[];
+  onChange: (c: RunChargeRow[]) => void;
+}) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  return (
+    <div className="space-y-2">
+      {charges.map((c, i) => (
+        <div key={i} className="rounded-lg border">
+          <div className="flex items-center gap-2 p-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+            >
+              {expandedIdx === i ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            </Button>
+            <Input
+              value={c.name}
+              onChange={(e) => {
+                const u = [...charges];
+                u[i] = { ...u[i], name: e.target.value };
+                onChange(u);
+              }}
+              className="h-8 flex-1"
+              placeholder="Charge name"
+            />
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground">Cost:</span>
+              <Input
+                type="number"
+                step="0.01"
+                value={c.cost}
+                onChange={(e) => {
+                  const u = [...charges];
+                  u[i] = { ...u[i], cost: e.target.value };
+                  onChange(u);
+                }}
+                className="h-8 w-20"
+              />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground">Sale:</span>
+              <Input
+                type="number"
+                step="0.01"
+                value={c.sale_price}
+                onChange={(e) => {
+                  const u = [...charges];
+                  u[i] = { ...u[i], sale_price: e.target.value };
+                  onChange(u);
+                }}
+                className="h-8 w-20"
+              />
+            </div>
+            {(c.qty_breaks?.length || 0) > 0 && (
+              <Badge variant="secondary" className="text-xs">{c.qty_breaks!.length} breaks</Badge>
+            )}
+            {(c.setup_charges?.length || 0) > 0 && (
+              <Badge variant="outline" className="text-xs">{c.setup_charges!.length} setups</Badge>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => onChange(charges.filter((_, j) => j !== i))}
+            >
+              <Trash2 className="h-3 w-3 text-destructive" />
+            </Button>
+          </div>
+
+          {expandedIdx === i && (
+            <div className="border-t bg-muted/20 p-3 space-y-4">
+              {/* Quantity Breaks */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Quantity Breaks</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => {
+                      const u = [...charges];
+                      u[i] = {
+                        ...u[i],
+                        qty_breaks: [...(u[i].qty_breaks || []), { min_qty: '', max_qty: '', cost: '', sale_price: '' }],
+                      };
+                      onChange(u);
+                    }}
+                  >
+                    <Plus className="h-3 w-3" /> Add Break
+                  </Button>
+                </div>
+                {(!c.qty_breaks || c.qty_breaks.length === 0) && (
+                  <p className="text-xs text-muted-foreground italic">No qty breaks — default cost/sale applies to all quantities.</p>
+                )}
+                {c.qty_breaks?.map((qb, qi) => (
+                  <div key={qi} className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground">Min:</span>
+                      <Input
+                        type="number"
+                        value={qb.min_qty}
+                        onChange={(e) => {
+                          const u = [...charges];
+                          const qbs = [...(u[i].qty_breaks || [])];
+                          qbs[qi] = { ...qbs[qi], min_qty: e.target.value };
+                          u[i] = { ...u[i], qty_breaks: qbs };
+                          onChange(u);
+                        }}
+                        className="h-7 w-16 text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground">Max:</span>
+                      <Input
+                        type="number"
+                        value={qb.max_qty}
+                        onChange={(e) => {
+                          const u = [...charges];
+                          const qbs = [...(u[i].qty_breaks || [])];
+                          qbs[qi] = { ...qbs[qi], max_qty: e.target.value };
+                          u[i] = { ...u[i], qty_breaks: qbs };
+                          onChange(u);
+                        }}
+                        className="h-7 w-16 text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground">Cost:</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={qb.cost}
+                        onChange={(e) => {
+                          const u = [...charges];
+                          const qbs = [...(u[i].qty_breaks || [])];
+                          qbs[qi] = { ...qbs[qi], cost: e.target.value };
+                          u[i] = { ...u[i], qty_breaks: qbs };
+                          onChange(u);
+                        }}
+                        className="h-7 w-20 text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground">Sale:</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={qb.sale_price}
+                        onChange={(e) => {
+                          const u = [...charges];
+                          const qbs = [...(u[i].qty_breaks || [])];
+                          qbs[qi] = { ...qbs[qi], sale_price: e.target.value };
+                          u[i] = { ...u[i], qty_breaks: qbs };
+                          onChange(u);
+                        }}
+                        className="h-7 w-20 text-xs"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0"
+                      onClick={() => {
+                        const u = [...charges];
+                        u[i] = { ...u[i], qty_breaks: (u[i].qty_breaks || []).filter((_, j) => j !== qi) };
+                        onChange(u);
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Setup Charges for this run charge */}
+              <div className="space-y-2 border-t pt-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Setup Charges for "{c.name || 'this charge'}"</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => {
+                      const u = [...charges];
+                      u[i] = {
+                        ...u[i],
+                        setup_charges: [...(u[i].setup_charges || []), { name: '', cost: '', sale_price: '', free_above_qty: '' }],
+                      };
+                      onChange(u);
+                    }}
+                  >
+                    <Plus className="h-3 w-3" /> Add Setup
+                  </Button>
+                </div>
+                {(!c.setup_charges || c.setup_charges.length === 0) && (
+                  <p className="text-xs text-muted-foreground italic">No setup charges for this run charge.</p>
+                )}
+                {c.setup_charges?.map((sc, si) => (
+                  <div key={si} className="flex items-center gap-2">
+                    <Input
+                      value={sc.name}
+                      onChange={(e) => {
+                        const u = [...charges];
+                        const scs = [...(u[i].setup_charges || [])];
+                        scs[si] = { ...scs[si], name: e.target.value };
+                        u[i] = { ...u[i], setup_charges: scs };
+                        onChange(u);
+                      }}
+                      className="h-7 flex-1 text-xs"
+                      placeholder="Setup name"
+                    />
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-muted-foreground">Cost:</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={sc.cost}
+                        onChange={(e) => {
+                          const u = [...charges];
+                          const scs = [...(u[i].setup_charges || [])];
+                          scs[si] = { ...scs[si], cost: e.target.value };
+                          u[i] = { ...u[i], setup_charges: scs };
+                          onChange(u);
+                        }}
+                        className="h-7 w-20 text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-muted-foreground">Sale:</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={sc.sale_price}
+                        onChange={(e) => {
+                          const u = [...charges];
+                          const scs = [...(u[i].setup_charges || [])];
+                          scs[si] = { ...scs[si], sale_price: e.target.value };
+                          u[i] = { ...u[i], setup_charges: scs };
+                          onChange(u);
+                        }}
+                        className="h-7 w-20 text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-muted-foreground">Free&gt;</span>
+                      <Input
+                        type="number"
+                        value={sc.free_above_qty}
+                        onChange={(e) => {
+                          const u = [...charges];
+                          const scs = [...(u[i].setup_charges || [])];
+                          scs[si] = { ...scs[si], free_above_qty: e.target.value };
+                          u[i] = { ...u[i], setup_charges: scs };
+                          onChange(u);
+                        }}
+                        className="h-7 w-16 text-xs"
+                        placeholder="—"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0"
+                      onClick={() => {
+                        const u = [...charges];
+                        u[i] = { ...u[i], setup_charges: (u[i].setup_charges || []).filter((_, j) => j !== si) };
+                        onChange(u);
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+      {charges.length === 0 && (
+        <div className="text-center text-muted-foreground py-4 border rounded-lg text-sm">
+          No run charges defined.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SetupChargeTable({
+  charges,
+  onChange,
+}: {
+  charges: SetupChargeRow[];
+  onChange: (c: SetupChargeRow[]) => void;
+}) {
+  return (
+    <div className="rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Name</TableHead>
+            <TableHead>Cost</TableHead>
+            <TableHead>Sale Price</TableHead>
+            <TableHead>Free Above Qty</TableHead>
+            <TableHead className="w-[50px]"></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {charges.map((c, i) => (
+            <TableRow key={i}>
+              <TableCell>
+                <Input
+                  value={c.name}
+                  onChange={(e) => {
+                    const u = [...charges];
+                    u[i] = { ...u[i], name: e.target.value };
+                    onChange(u);
+                  }}
+                  className="h-8"
+                  placeholder="Charge name"
+                />
+              </TableCell>
+              <TableCell>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={c.cost}
+                  onChange={(e) => {
+                    const u = [...charges];
+                    u[i] = { ...u[i], cost: e.target.value };
+                    onChange(u);
+                  }}
+                  className="h-8"
+                />
+              </TableCell>
+              <TableCell>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={c.sale_price}
+                  onChange={(e) => {
+                    const u = [...charges];
+                    u[i] = { ...u[i], sale_price: e.target.value };
+                    onChange(u);
+                  }}
+                  className="h-8"
+                />
+              </TableCell>
+              <TableCell>
+                <Input
+                  type="number"
+                  value={c.free_above_qty || ''}
+                  onChange={(e) => {
+                    const u = [...charges];
+                    u[i] = { ...u[i], free_above_qty: e.target.value };
+                    onChange(u);
+                  }}
+                  className="h-8"
+                  placeholder="—"
+                />
+              </TableCell>
+              <TableCell>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onChange(charges.filter((_, j) => j !== i))}
+                >
+                  <Trash2 className="h-3 w-3 text-destructive" />
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+          {charges.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center text-muted-foreground py-4">
+                No setup charges defined.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}

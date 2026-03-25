@@ -1,0 +1,1013 @@
+import { useState, useCallback } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import { Calendar } from '@/components/ui/calendar';
+import { useToast } from '@/hooks/use-toast';
+import { ArrowLeft, Plus, Loader2, CalendarIcon, ChevronDown, Building2, Users, Truck, DollarSign, Clock, StickyNote, Pencil, Trash2, X, Check, Link2, ExternalLink } from 'lucide-react';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import type { Project, Client, ClientContact, ClientAddress, PresentationItem, ProjectStatus } from '@/types/database';
+import { projectStatusLabels, paymentTermsLabels, contactTypeLabels } from '@/types/database';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ProjectProductForm } from '@/components/projects/ProjectProductForm';
+import { ProjectProductCard } from '@/components/projects/ProjectProductCard';
+import { ProjectFileLibrary } from '@/components/projects/ProjectFileLibrary';
+import { ProjectCreativeSection } from '@/components/creative/ProjectCreativeSection';
+
+export default function ProjectDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [isOpen, setIsOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<PresentationItem | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: project, isLoading: projectLoading } = useQuery({
+    queryKey: ['project', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*, client:clients(*)')
+        .eq('id', id)
+        .single();
+      if (error) throw error;
+      return data as unknown as Project & { client: Client };
+    },
+  });
+
+  const { data: contacts } = useQuery({
+    queryKey: ['client-contacts', project?.client_id],
+    enabled: !!project?.client_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('client_contacts')
+        .select('*')
+        .eq('client_id', project!.client_id)
+        .order('name');
+      if (error) throw error;
+      return data as unknown as ClientContact[];
+    },
+  });
+
+  const { data: items, isLoading: itemsLoading } = useQuery({
+    queryKey: ['presentation-items', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('presentation_items')
+        .select('*')
+        .eq('project_id', id)
+        .order('sort_order');
+      if (error) throw error;
+      return data as unknown as PresentationItem[];
+    },
+  });
+
+  const updateProjectMutation = useMutation({
+    mutationFn: async (updates: Partial<Project>) => {
+      const { error } = await supabase
+        .from('projects')
+        .update(updates as any)
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project', id] });
+    },
+    onError: (error) => {
+      toast({ variant: 'destructive', title: 'Error saving project', description: error.message });
+    },
+  });
+
+  const saveField = useCallback(
+    (field: string, value: any) => {
+      if (!project) return;
+      if ((project as any)[field] === value) return;
+      updateProjectMutation.mutate({ [field]: value } as Partial<Project>);
+    },
+    [project, updateProjectMutation]
+  );
+
+  const saveItemMutation = useMutation({
+    mutationFn: async (item: Partial<PresentationItem>) => {
+      const payload: any = { ...item };
+      if (item.id) {
+        const { error } = await supabase
+          .from('presentation_items')
+          .update(payload)
+          .eq('id', item.id);
+        if (error) throw error;
+      } else {
+        delete payload.id;
+        const { error } = await supabase.from('presentation_items').insert(payload);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['presentation-items', id] });
+      setIsOpen(false);
+      setEditingItem(null);
+      toast({ title: 'Product saved successfully' });
+    },
+    onError: (error) => {
+      toast({ variant: 'destructive', title: 'Error saving product', description: error.message });
+    },
+  });
+
+  const deleteItemMutation = useMutation({
+    mutationFn: async (itemId: string) => {
+      const { error } = await supabase.from('presentation_items').delete().eq('id', itemId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['presentation-items', id] });
+      toast({ title: 'Product removed' });
+    },
+  });
+
+  const duplicateItemMutation = useMutation({
+    mutationFn: async (source: PresentationItem) => {
+      const nextSort = (items?.length || 0) + 1;
+      const { id: _id, created_at, updated_at, total_price, ...rest } = source as any;
+      const { error } = await supabase.from('presentation_items').insert({
+        ...rest,
+        display_name: `${source.display_name} (Copy)`,
+        status: 'draft',
+        sort_order: nextSort,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['presentation-items', id] });
+      toast({ title: 'Product duplicated' });
+    },
+    onError: (error) => {
+      toast({ variant: 'destructive', title: 'Error duplicating product', description: error.message });
+    },
+  });
+
+  const createOrderMutation = useMutation({
+    mutationFn: async (item: PresentationItem) => {
+      const { error } = await supabase.from('orders').insert({
+        project_id: id,
+        presentation_item_id: item.id,
+        status: 'order_entry_needed',
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      toast({ title: 'Order created from approved item' });
+    },
+  });
+
+  const handleEdit = (item: PresentationItem) => {
+    setEditingItem(item);
+    setIsOpen(true);
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (!open) setEditingItem(null);
+  };
+
+  if (projectLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">Project not found.</div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Top bar: Back + Company + Project Name + Stage */}
+      <ProjectTopBar project={project} onSave={saveField} />
+
+      {/* Card sections */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ClientInfoCard project={project} contacts={contacts || []} clientId={project.client_id} />
+        <TimelineCard project={project} onSave={saveField} />
+        <ShippingCard clientId={project.client_id} client={project.client} />
+        <FinancialCard project={project} onSave={saveField} />
+      </div>
+
+      <NotesCard project={project} onSave={saveField} />
+
+      {/* Products section */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold">Products</h2>
+        <Button onClick={() => { setEditingItem(null); setIsOpen(true); }}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add Product
+        </Button>
+      </div>
+
+      <Sheet open={isOpen} onOpenChange={handleOpenChange}>
+        <SheetContent side="right" className="sm:max-w-[75vw] w-full p-0 flex flex-col">
+          <SheetHeader className="sr-only">
+            <SheetTitle>{editingItem ? 'Edit Product' : 'Add Product'}</SheetTitle>
+          </SheetHeader>
+          <ProjectProductForm
+            projectId={id!}
+            item={editingItem}
+            onSave={(data) => saveItemMutation.mutate(data)}
+            isSaving={saveItemMutation.isPending}
+          />
+        </SheetContent>
+      </Sheet>
+
+      {itemsLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : items?.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground border rounded-lg">
+          No products yet. Add products to build a presentation for the client.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {items?.map((item) => (
+            <ProjectProductCard
+              key={item.id}
+              item={item}
+              onEdit={handleEdit}
+              onDelete={(id) => deleteItemMutation.mutate(id)}
+              onDuplicate={(item) => duplicateItemMutation.mutate(item)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Creative Requests section */}
+      <ProjectCreativeSection projectId={id!} />
+
+      {/* Files section */}
+      <ProjectFileLibrary projectId={id!} clientId={project.client_id} />
+    </div>
+  );
+}
+
+// --- Top bar: Back + Company name + Project Name + Stage ---
+
+function ProjectTopBar({
+  project,
+  onSave,
+}: {
+  project: Project & { client: Client };
+  onSave: (field: string, value: any) => void;
+}) {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const [name, setName] = useState(project.name);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+
+  const handleStatusChange = (v: string) => {
+    onSave('status', v);
+    if (project.status === 'cancelled' && v !== 'cancelled') {
+      onSave('cancellation_reason', null);
+    }
+  };
+
+  const confirmCancellation = () => {
+    if (!cancelReason.trim()) return;
+    onSave('status', 'cancelled');
+    onSave('cancellation_reason', cancelReason.trim());
+    setShowCancelDialog(false);
+    setCancelReason('');
+  };
+
+  const statusStages: ProjectStatus[] = ['opportunity', 'qualifying', 'curating', 'in_design', 'presenting', 'client_review', 'ordered'];
+  const currentIndex = statusStages.indexOf(project.status as ProjectStatus);
+  const isCancelled = project.status === 'cancelled';
+
+  return (
+    <>
+      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel Project</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Reason for cancellation *</Label>
+            <Textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Provide the reason and any notes for cancelling this project..."
+              rows={4}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCancelDialog(false)}>
+              Go Back
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmCancellation}
+              disabled={!cancelReason.trim()}
+            >
+              Confirm Cancellation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 flex-1">
+            <Button variant="ghost" size="icon" onClick={() => navigate('/admin/projects')}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div className="flex-1 min-w-0">
+              <Link
+                to={`/admin/clients/${project.client_id}`}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {project.client?.company_name}
+              </Link>
+              <div className="flex items-center gap-3 mt-0.5">
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onBlur={() => onSave('name', name)}
+                  className="text-xl font-semibold h-9 border-none shadow-none px-0 focus-visible:ring-0 bg-transparent"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const url = `${window.location.origin}/project/${project.id}`;
+                navigator.clipboard.writeText(url);
+                toast({ title: 'Client link copied to clipboard' });
+              }}
+            >
+              <Link2 className="h-3.5 w-3.5 mr-1.5" />
+              Copy Client Link
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(`/project/${project.id}`, '_blank')}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+              Preview
+            </Button>
+            {!isCancelled && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                onClick={() => { setCancelReason(''); setShowCancelDialog(true); }}
+              >
+                <X className="h-3.5 w-3.5 mr-1.5" />
+                Cancel Project
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Status Timeline */}
+        <div className="ml-12">
+          <div className="flex items-center w-full">
+            {statusStages.map((stage, i) => {
+              const isCompleted = !isCancelled && currentIndex > i;
+              const isCurrent = !isCancelled && currentIndex === i;
+              const isFuture = isCancelled || currentIndex < i;
+
+              return (
+                <div key={stage} className="flex items-center flex-1 last:flex-none">
+                  <button
+                    onClick={() => handleStatusChange(stage)}
+                    className="flex flex-col items-center gap-1.5 group relative"
+                  >
+                    <div
+                      className={cn(
+                        'h-3 w-3 rounded-full border-2 transition-all',
+                        isCompleted && 'bg-primary border-primary',
+                        isCurrent && 'bg-primary border-primary ring-4 ring-primary/20',
+                        isFuture && 'bg-background border-muted-foreground/30 group-hover:border-primary/50'
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        'text-[11px] whitespace-nowrap transition-colors',
+                        isCompleted && 'text-primary font-medium',
+                        isCurrent && 'text-primary font-semibold',
+                        isFuture && 'text-muted-foreground group-hover:text-foreground'
+                      )}
+                    >
+                      {projectStatusLabels[stage]}
+                    </span>
+                  </button>
+                  {i < statusStages.length - 1 && (
+                    <div
+                      className={cn(
+                        'h-0.5 flex-1 mx-1 mt-[-18px] transition-colors',
+                        !isCancelled && currentIndex > i ? 'bg-primary' : 'bg-muted-foreground/20'
+                      )}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {isCancelled && (
+            <div className="mt-2">
+              <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20">
+                ● Cancelled
+              </Badge>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// --- Client Info Card ---
+
+function ClientInfoCard({
+  project,
+  contacts,
+  clientId,
+}: {
+  project: Project & { client: Client };
+  contacts: ClientContact[];
+  clientId: string;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const insertContact = useMutation({
+    mutationFn: async (c: { first_name: string; last_name: string; email: string; contact_type: string[] }) => {
+      const name = [c.first_name, c.last_name].filter(Boolean).join(' ');
+      const { error } = await supabase.from('client_contacts').insert({ client_id: clientId, name, ...c });
+      if (error) throw error;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['client-contacts', clientId] }); setAdding(false); toast({ title: 'Contact added' }); },
+    onError: (e) => toast({ variant: 'destructive', title: 'Error', description: e.message }),
+  });
+
+  const updateContact = useMutation({
+    mutationFn: async ({ id, ...c }: { id: string; first_name: string; last_name: string; email: string; contact_type: string[] }) => {
+      const name = [c.first_name, c.last_name].filter(Boolean).join(' ');
+      const { error } = await supabase.from('client_contacts').update({ name, ...c }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['client-contacts', clientId] }); setEditingId(null); toast({ title: 'Contact updated' }); },
+    onError: (e) => toast({ variant: 'destructive', title: 'Error', description: e.message }),
+  });
+
+  const deleteContact = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('client_contacts').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['client-contacts', clientId] }); toast({ title: 'Contact removed' }); },
+  });
+
+  return (
+    <Card>
+      <CardContent className="pt-4 pb-4 space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <Building2 className="h-4 w-4" />
+          Client
+        </div>
+        <div>
+          <Link to={`/admin/clients/${project.client_id}`} className="font-medium hover:underline">
+            {project.client?.company_name}
+          </Link>
+        </div>
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Users className="h-3.5 w-3.5" />
+              Contacts
+            </div>
+            {!adding && (
+              <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => { setAdding(true); setEditingId(null); }}>
+                <Plus className="h-3 w-3 mr-1" /> Add
+              </Button>
+            )}
+          </div>
+
+          {contacts.map((c) =>
+            editingId === c.id ? (
+              <ContactInlineForm
+                key={c.id}
+                initial={{ first_name: c.first_name || '', last_name: c.last_name || '', email: c.email, contact_type: c.contact_type }}
+                onSave={(data) => updateContact.mutate({ id: c.id, ...data })}
+                onCancel={() => setEditingId(null)}
+                saving={updateContact.isPending}
+              />
+            ) : (
+              <div key={c.id} className="flex items-center justify-between text-sm group">
+                <div>
+                  <span className="font-medium">{c.name}</span>
+                  <span className="text-muted-foreground ml-2 text-xs">{c.email}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {c.contact_type.map((t) => (
+                    <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">
+                      {(contactTypeLabels as Record<string, string>)[t] || t}
+                    </Badge>
+                  ))}
+                  <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={() => { setEditingId(c.id); setAdding(false); }}>
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 text-destructive" onClick={() => deleteContact.mutate(c.id)}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )
+          )}
+
+          {adding && (
+            <ContactInlineForm
+              initial={{ first_name: '', last_name: '', email: '', contact_type: ['order'] }}
+              onSave={(data) => insertContact.mutate(data)}
+              onCancel={() => setAdding(false)}
+              saving={insertContact.isPending}
+            />
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ContactInlineForm({
+  initial,
+  onSave,
+  onCancel,
+  saving,
+}: {
+  initial: { first_name: string; last_name: string; email: string; contact_type: string[] };
+  onSave: (data: { first_name: string; last_name: string; email: string; contact_type: string[] }) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [firstName, setFirstName] = useState(initial.first_name);
+  const [lastName, setLastName] = useState(initial.last_name);
+  const [email, setEmail] = useState(initial.email);
+  const [types, setTypes] = useState<string[]>(initial.contact_type);
+
+  const toggleType = (t: string) => setTypes((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]);
+
+  return (
+    <div className="border rounded-md p-3 space-y-2 bg-muted/30">
+      <div className="grid grid-cols-2 gap-2">
+        <Input placeholder="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} className="h-8 text-sm" />
+        <Input placeholder="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} className="h-8 text-sm" />
+      </div>
+      <Input placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="h-8 text-sm" />
+      <div className="flex items-center gap-4 text-xs">
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <Checkbox checked={types.includes('order')} onCheckedChange={() => toggleType('order')} className="h-3.5 w-3.5" />
+          Order
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <Checkbox checked={types.includes('finance')} onCheckedChange={() => toggleType('finance')} className="h-3.5 w-3.5" />
+          Finance
+        </label>
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onCancel}><X className="h-3 w-3 mr-1" />Cancel</Button>
+        <Button size="sm" className="h-7 text-xs" onClick={() => onSave({ first_name: firstName, last_name: lastName, email, contact_type: types })} disabled={!email.trim() || saving}>
+          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Check className="h-3 w-3 mr-1" />Save</>}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// --- Shipping Card ---
+
+function ShippingCard({ clientId, client }: { clientId: string; client?: Client }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [adding, setAdding] = useState(false);
+
+  const { data: addresses } = useQuery({
+    queryKey: ['client-addresses', clientId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('client_addresses')
+        .select('*')
+        .eq('client_id', clientId)
+        .order('is_default', { ascending: false });
+      if (error) throw error;
+      return data as unknown as ClientAddress[];
+    },
+  });
+
+  // Build a virtual address from legacy client shipping fields if no address book entries exist
+  const legacyAddress: ClientAddress | null = (client?.shipping_address_line1)
+    ? {
+        id: '__legacy__',
+        client_id: clientId,
+        label: 'Primary Shipping',
+        address_line1: client.shipping_address_line1 || null,
+        address_line2: client.shipping_address_line2 || null,
+        city: client.shipping_city || null,
+        state: client.shipping_state || null,
+        zip: client.shipping_zip || null,
+        country: client.shipping_country || null,
+        is_default: true,
+        created_at: '',
+        updated_at: '',
+      }
+    : null;
+
+  const effectiveAddresses = addresses && addresses.length > 0 ? addresses : (legacyAddress ? [legacyAddress] : []);
+
+  const defaultAddr = effectiveAddresses.find((a) => a.is_default) || effectiveAddresses[0];
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const selected = effectiveAddresses.find((a) => a.id === selectedId) || defaultAddr;
+
+  const insertAddress = useMutation({
+    mutationFn: async (a: { label: string; address_line1: string; address_line2: string; city: string; state: string; zip: string; is_default: boolean }) => {
+      const { data, error } = await supabase.from('client_addresses').insert({ client_id: clientId, ...a }).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['client-addresses', clientId] });
+      setAdding(false);
+      setSelectedId(data.id);
+      toast({ title: 'Address added' });
+    },
+    onError: (e) => toast({ variant: 'destructive', title: 'Error', description: e.message }),
+  });
+
+  const formatAddress = (a: ClientAddress) => {
+    return [a.address_line1, a.address_line2, [a.city, a.state, a.zip].filter(Boolean).join(', '), a.country !== 'USA' ? a.country : null].filter(Boolean).join(', ');
+  };
+
+  return (
+    <Card>
+      <CardContent className="pt-4 pb-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Truck className="h-4 w-4" />
+            Shipping Address
+          </div>
+          {!adding && (
+            <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => setAdding(true)}>
+              <Plus className="h-3 w-3 mr-1" /> New
+            </Button>
+          )}
+        </div>
+
+        {effectiveAddresses.length > 0 && (
+          <Select value={selected?.id || ''} onValueChange={setSelectedId}>
+            <SelectTrigger className="h-9">
+              <SelectValue placeholder="Select address" />
+            </SelectTrigger>
+            <SelectContent>
+              {effectiveAddresses.map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.label}{a.is_default ? ' (Default)' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {selected && (
+          <div className="text-sm space-y-0.5">
+            {[selected.address_line1, selected.address_line2, [selected.city, selected.state, selected.zip].filter(Boolean).join(', '), selected.country !== 'USA' ? selected.country : null]
+              .filter(Boolean)
+              .map((line, i) => <p key={i}>{line}</p>)}
+          </div>
+        )}
+
+        {!selected && !adding && (
+          <p className="text-sm text-muted-foreground italic">No shipping address on file</p>
+        )}
+
+        {adding && <AddressInlineForm onSave={(data) => insertAddress.mutate(data)} onCancel={() => setAdding(false)} saving={insertAddress.isPending} />}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AddressInlineForm({
+  onSave,
+  onCancel,
+  saving,
+}: {
+  onSave: (data: { label: string; address_line1: string; address_line2: string; city: string; state: string; zip: string; is_default: boolean }) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [label, setLabel] = useState('Shipping');
+  const [line1, setLine1] = useState('');
+  const [line2, setLine2] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [zip, setZip] = useState('');
+  const [isDefault, setIsDefault] = useState(false);
+
+  return (
+    <div className="border rounded-md p-3 space-y-2 bg-muted/30">
+      <Input placeholder="Label (e.g. Warehouse)" value={label} onChange={(e) => setLabel(e.target.value)} className="h-8 text-sm" />
+      <Input placeholder="Address line 1" value={line1} onChange={(e) => setLine1(e.target.value)} className="h-8 text-sm" />
+      <Input placeholder="Address line 2" value={line2} onChange={(e) => setLine2(e.target.value)} className="h-8 text-sm" />
+      <div className="grid grid-cols-3 gap-2">
+        <Input placeholder="City" value={city} onChange={(e) => setCity(e.target.value)} className="h-8 text-sm" />
+        <Input placeholder="State" value={state} onChange={(e) => setState(e.target.value)} className="h-8 text-sm" />
+        <Input placeholder="ZIP" value={zip} onChange={(e) => setZip(e.target.value)} className="h-8 text-sm" />
+      </div>
+      <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+        <Checkbox checked={isDefault} onCheckedChange={(v) => setIsDefault(!!v)} className="h-3.5 w-3.5" />
+        Set as default
+      </label>
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onCancel}><X className="h-3 w-3 mr-1" />Cancel</Button>
+        <Button size="sm" className="h-7 text-xs" onClick={() => onSave({ label, address_line1: line1, address_line2: line2, city, state, zip, is_default: isDefault })} disabled={!line1.trim() || saving}>
+          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Check className="h-3 w-3 mr-1" />Save</>}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// --- Timeline & Production Card ---
+
+function TimelineCard({
+  project,
+  onSave,
+}: {
+  project: Project;
+  onSave: (field: string, value: any) => void;
+}) {
+  return (
+    <Card>
+      <CardContent className="pt-4 pb-4 space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <Clock className="h-4 w-4" />
+          Timeline & Production
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <DateField
+            label="In Hands Date"
+            value={project.in_hands_date}
+            onChange={(v) => onSave('in_hands_date', v)}
+          />
+          <DateField
+            label="Project Deadline"
+            value={project.project_deadline}
+            onChange={(v) => onSave('project_deadline', v)}
+          />
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Production Time</Label>
+            <Select
+              value={project.production_time}
+              onValueChange={(v) => onSave('production_time', v)}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="rush">Rush</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Split Ship</Label>
+            <div className="flex items-center h-9">
+              <Switch
+                checked={project.split_ship}
+                onCheckedChange={(v) => onSave('split_ship', v)}
+              />
+              <span className="ml-2 text-sm">{project.split_ship ? 'Yes' : 'No'}</span>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Financial Card ---
+
+function FinancialCard({
+  project,
+  onSave,
+}: {
+  project: Project & { client: Client };
+  onSave: (field: string, value: any) => void;
+}) {
+  const [budget, setBudget] = useState(project.budget?.toString() || '');
+  const paymentLabel =
+    (paymentTermsLabels as Record<string, string>)[project.client?.payment_terms] ||
+    project.client?.payment_terms ||
+    '—';
+
+  return (
+    <Card>
+      <CardContent className="pt-4 pb-4 space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <DollarSign className="h-4 w-4" />
+          Financial
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Budget</Label>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+              <Input
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                onBlur={() => onSave('budget', budget ? parseFloat(budget) : null)}
+                placeholder="0.00"
+                className="h-9 pl-6"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Tax Exempt</Label>
+            <div className="flex items-center h-9">
+              <Switch
+                checked={project.tax_exempt}
+                onCheckedChange={(v) => onSave('tax_exempt', v)}
+              />
+              <span className="ml-2 text-sm">{project.tax_exempt ? 'Yes' : 'No'}</span>
+            </div>
+          </div>
+          <div className="space-y-1 col-span-2">
+            <Label className="text-xs text-muted-foreground">Payment Terms</Label>
+            <p className="text-sm h-9 flex items-center">{paymentLabel}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Notes Card (Collapsible) ---
+
+function NotesCard({
+  project,
+  onSave,
+}: {
+  project: Project;
+  onSave: (field: string, value: any) => void;
+}) {
+  const isCancelled = project.status === 'cancelled';
+  const [isNotesOpen, setIsNotesOpen] = useState(
+    !!(project.client_notes || project.internal_notes || isCancelled)
+  );
+  const [repNotes, setRepNotes] = useState(project.client_notes || '');
+  const [internalNotes, setInternalNotes] = useState(project.internal_notes || '');
+
+  return (
+    <Collapsible open={isNotesOpen} onOpenChange={setIsNotesOpen}>
+      <Card>
+        <CollapsibleTrigger asChild>
+          <button className="flex items-center justify-between w-full px-6 pt-4 pb-2 text-left">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <StickyNote className="h-4 w-4" />
+              Notes
+            </div>
+            <ChevronDown
+              className={cn(
+                'h-4 w-4 text-muted-foreground transition-transform',
+                isNotesOpen && 'rotate-180'
+              )}
+            />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="pt-0 pb-4 space-y-4">
+            {isCancelled && project.cancellation_reason && (
+              <div className="space-y-1 border-l-4 border-destructive bg-destructive/5 rounded-r-md pl-3 pr-2 py-2">
+                <Label className="text-xs font-medium text-destructive">Cancellation</Label>
+                <p className="text-sm text-foreground whitespace-pre-wrap">{project.cancellation_reason}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1 border-l-4 border-blue-400 bg-blue-50/50 dark:bg-blue-950/20 rounded-r-md pl-3 pr-2 py-2">
+                <Label className="text-xs font-medium text-blue-700 dark:text-blue-400">Client-Facing Notes</Label>
+                <p className="text-[11px] text-blue-600/70 dark:text-blue-400/60">Visible to the client on their portal</p>
+                <Textarea
+                  value={repNotes}
+                  onChange={(e) => setRepNotes(e.target.value)}
+                  onBlur={() => onSave('client_notes', repNotes || null)}
+                  rows={3}
+                  placeholder="Notes the client will see..."
+                />
+              </div>
+              <div className="space-y-1 border-l-4 border-amber-400 bg-amber-50/50 dark:bg-amber-950/20 rounded-r-md pl-3 pr-2 py-2">
+                <Label className="text-xs font-medium text-amber-700 dark:text-amber-400">Internal Notes (Admin Only)</Label>
+                <p className="text-[11px] text-amber-600/70 dark:text-amber-400/60">Only visible to your team — never shown to the client</p>
+                <Textarea
+                  value={internalNotes}
+                  onChange={(e) => setInternalNotes(e.target.value)}
+                  onBlur={() => onSave('internal_notes', internalNotes || null)}
+                  rows={3}
+                  placeholder="Internal team notes..."
+                />
+              </div>
+            </div>
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
+
+// --- Date picker field ---
+
+function DateField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string | null;
+  onChange: (value: string | null) => void;
+}) {
+  const date = value ? new Date(value + 'T00:00:00') : undefined;
+
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            className={cn(
+              'h-9 w-full justify-start text-left font-normal',
+              !date && 'text-muted-foreground'
+            )}
+          >
+            <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+            {date ? format(date, 'MMM d, yyyy') : 'Pick date'}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <Calendar
+            mode="single"
+            selected={date}
+            onSelect={(d) => onChange(d ? format(d, 'yyyy-MM-dd') : null)}
+            initialFocus
+          />
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}

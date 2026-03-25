@@ -1,0 +1,431 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/hooks/use-toast';
+import { Plus, Pencil, Loader2 } from 'lucide-react';
+import type { Product, ProductSize, ProductType } from '@/types/database';
+import { productTypeLabels } from '@/types/database';
+import { ProductBasicsForm } from '@/components/products/ProductBasicsForm';
+import { ProductBlankCostsForm } from '@/components/products/ProductBlankCostsForm';
+import { ProductVariantsForm, type ColorEntry } from '@/components/products/ProductVariantsForm';
+import { ProductDecorationLocationsForm, type DecorationLocationEntry } from '@/components/products/ProductDecorationLocationsForm';
+
+export default function ProductsPage() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: products, isLoading } = useQuery({
+    queryKey: ['products'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('name');
+      if (error) throw error;
+      return data as Product[];
+    },
+  });
+
+  const handleEdit = (product: Product) => {
+    setEditingProduct(product);
+    setIsOpen(true);
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (!open) setEditingProduct(null);
+  };
+
+  const handleSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ['products'] });
+    setIsOpen(false);
+    setEditingProduct(null);
+    toast({ title: 'Product saved successfully' });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Products</h1>
+          <p className="text-muted-foreground">
+            Manage your contract product library
+          </p>
+        </div>
+        <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Product
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {editingProduct ? 'Edit Product' : 'Create Contract Product'}
+              </DialogTitle>
+            </DialogHeader>
+            <ProductForm
+              product={editingProduct}
+              onSuccess={handleSuccess}
+            />
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : products?.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          No products yet. Add your first product to get started.
+        </div>
+      ) : (
+        <div className="rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>SKU</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Sizes</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-[80px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {products?.map((product) => (
+                <TableRow 
+                  key={product.id}
+                  onClick={() => handleEdit(product)}
+                  className="cursor-pointer hover:bg-muted/50"
+                >
+                  <TableCell className="font-medium">{product.name}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {product.sku || '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {productTypeLabels[product.product_type]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {product.available_sizes?.length
+                      ? product.available_sizes.join(', ')
+                      : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={product.is_active ? 'default' : 'secondary'}>
+                      {product.is_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleEdit(product)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ProductFormProps {
+  product: Product | null;
+  onSuccess: () => void;
+}
+
+function ProductForm({ product, onSuccess }: ProductFormProps) {
+  const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState('basics');
+  
+  // Basics state
+  const [name, setName] = useState(product?.name || '');
+  const [sku, setSku] = useState(product?.sku || '');
+  const [primaryImageUrl, setPrimaryImageUrl] = useState(product?.primary_image_url || '');
+  const [isActive, setIsActive] = useState(product?.is_active ?? true);
+  
+  // Blank costs state
+  const [blankCostSxl, setBlankCostSxl] = useState(
+    product?.default_blank_cost_sxl?.toString() || ''
+  );
+  const [blankCost2xl, setBlankCost2xl] = useState(
+    product?.default_blank_cost_2xl?.toString() || ''
+  );
+  const [blankCost3xl, setBlankCost3xl] = useState(
+    product?.default_blank_cost_3xl?.toString() || ''
+  );
+  const [blankCost4xl, setBlankCost4xl] = useState(
+    product?.default_blank_cost_4xl?.toString() || ''
+  );
+  
+  // Variants state
+  const [selectedSizes, setSelectedSizes] = useState<ProductSize[]>(
+    (product?.available_sizes as ProductSize[]) || []
+  );
+  const [colors, setColors] = useState<ColorEntry[]>([]);
+  
+  // Decoration locations state
+  const [decorationLocations, setDecorationLocations] = useState<DecorationLocationEntry[]>([]);
+  
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Load colors and decoration locations if editing
+  useState(() => {
+    if (product?.id) {
+      // Load colors
+      supabase
+        .from('product_colors')
+        .select('*, product_color_images(*)')
+        .eq('product_id', product.id)
+        .order('sort_order')
+        .then(({ data }) => {
+          if (data) {
+            setColors(
+              data.map((c: any) => ({
+                id: c.id,
+                color_name: c.color_name,
+                color_hex: c.color_hex || '#000000',
+                images: (c.product_color_images || []).map((img: { id: string; image_url: string; is_primary: boolean }) => ({
+                  id: img.id,
+                  image_url: img.image_url,
+                  is_primary: img.is_primary,
+                })),
+              }))
+            );
+          }
+        });
+
+      // Load decoration locations
+      supabase
+        .from('product_decoration_locations')
+        .select('*')
+        .eq('product_id', product.id)
+        .order('sort_order')
+        .then(({ data }) => {
+          if (data) {
+            setDecorationLocations(
+              data.map((loc) => ({
+                id: loc.id,
+                location_name: loc.location_name,
+                placeholder_run_charge: loc.placeholder_run_charge?.toString() || '',
+                placeholder_setup_charge: loc.placeholder_setup_charge?.toString() || '',
+              }))
+            );
+          }
+        });
+    }
+  });
+
+  const handleSubmit = async () => {
+    if (!name.trim()) {
+      toast({
+        variant: 'destructive',
+        title: 'Product name is required',
+      });
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const productData = {
+        name: name.trim(),
+        sku: sku.trim() || null,
+        product_type: 'contract' as ProductType,
+        is_active: isActive,
+        primary_image_url: primaryImageUrl || null,
+        available_sizes: selectedSizes.length > 0 ? selectedSizes : null,
+        default_blank_cost_sxl: blankCostSxl ? parseFloat(blankCostSxl) : null,
+        default_blank_cost_2xl: blankCost2xl ? parseFloat(blankCost2xl) : null,
+        default_blank_cost_3xl: blankCost3xl ? parseFloat(blankCost3xl) : null,
+        default_blank_cost_4xl: blankCost4xl ? parseFloat(blankCost4xl) : null,
+      };
+
+      let productId = product?.id;
+
+      if (productId) {
+        // Update existing product
+        const { error } = await supabase
+          .from('products')
+          .update(productData)
+          .eq('id', productId);
+        if (error) throw error;
+      } else {
+        // Insert new product
+        const { data, error } = await supabase
+          .from('products')
+          .insert(productData)
+          .select()
+          .single();
+        if (error) throw error;
+        productId = data.id;
+      }
+
+      // Handle colors - delete existing and re-insert
+      await supabase
+        .from('product_colors')
+        .delete()
+        .eq('product_id', productId);
+
+      for (let i = 0; i < colors.length; i++) {
+        const color = colors[i];
+        if (!color.color_name.trim()) continue;
+
+        const { data: colorData, error: colorError } = await supabase
+          .from('product_colors')
+          .insert({
+            product_id: productId,
+            color_name: color.color_name.trim(),
+            color_hex: color.color_hex || '#000000',
+            sort_order: i,
+          } as any)
+          .select()
+          .single();
+
+        if (colorError) throw colorError;
+
+        // Insert images for this color
+        for (let j = 0; j < color.images.length; j++) {
+          const img = color.images[j];
+          if (!img.image_url.trim()) continue;
+
+          await supabase.from('product_color_images').insert({
+            product_color_id: colorData.id,
+            image_url: img.image_url.trim(),
+            is_primary: img.is_primary,
+            sort_order: j,
+          });
+        }
+      }
+
+      // Handle decoration locations - delete existing and re-insert
+      await supabase
+        .from('product_decoration_locations')
+        .delete()
+        .eq('product_id', productId);
+
+      for (let i = 0; i < decorationLocations.length; i++) {
+        const loc = decorationLocations[i];
+        if (!loc.location_name.trim()) continue;
+
+        await supabase.from('product_decoration_locations').insert({
+          product_id: productId,
+          location_name: loc.location_name.trim(),
+          placeholder_run_charge: loc.placeholder_run_charge
+            ? parseFloat(loc.placeholder_run_charge)
+            : null,
+          placeholder_setup_charge: loc.placeholder_setup_charge
+            ? parseFloat(loc.placeholder_setup_charge)
+            : null,
+          sort_order: i,
+        });
+      }
+
+      onSuccess();
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Error saving product',
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="basics">Basics</TabsTrigger>
+          <TabsTrigger value="costs">Blank Costs</TabsTrigger>
+          <TabsTrigger value="variants">Variants</TabsTrigger>
+          <TabsTrigger value="decorations">Decorations</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="basics" className="mt-6">
+          <ProductBasicsForm
+            name={name}
+            setName={setName}
+            sku={sku}
+            setSku={setSku}
+            isActive={isActive}
+            setIsActive={setIsActive}
+            primaryImageUrl={primaryImageUrl}
+            setPrimaryImageUrl={setPrimaryImageUrl}
+          />
+        </TabsContent>
+
+        <TabsContent value="costs" className="mt-6">
+          <ProductBlankCostsForm
+            blankCostSxl={blankCostSxl}
+            setBlankCostSxl={setBlankCostSxl}
+            blankCost2xl={blankCost2xl}
+            setBlankCost2xl={setBlankCost2xl}
+            blankCost3xl={blankCost3xl}
+            setBlankCost3xl={setBlankCost3xl}
+            blankCost4xl={blankCost4xl}
+            setBlankCost4xl={setBlankCost4xl}
+          />
+        </TabsContent>
+
+        <TabsContent value="variants" className="mt-6">
+          <ProductVariantsForm
+            selectedSizes={selectedSizes}
+            setSelectedSizes={setSelectedSizes}
+            colors={colors}
+            setColors={setColors}
+          />
+        </TabsContent>
+
+        <TabsContent value="decorations" className="mt-6">
+          <ProductDecorationLocationsForm
+            locations={decorationLocations}
+            setLocations={setDecorationLocations}
+          />
+        </TabsContent>
+      </Tabs>
+
+      <div className="flex justify-end gap-2 pt-4 border-t">
+        <Button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isLoading || !name.trim()}
+        >
+          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {product ? 'Update Product' : 'Create Product'}
+        </Button>
+      </div>
+    </div>
+  );
+}
